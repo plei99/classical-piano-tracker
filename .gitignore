@@ -1,11 +1,65 @@
 .DS_Store
+
+# Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.coverage
+.coverage.*
+.hypothesis/
+.ipynb_checkpoints/
+.mypy_cache/
+.nox/
+.pyre/
 .pytest_cache/
+.python-version
+.ruff_cache/
+.tox/
 .venv/
+ENV/
+env/
+htmlcov/
+pip-wheel-metadata/
+site/
 venv/
-backend/tracker.db
-node_modules/
-dist/
-frontend/dist/
 
+# Environment files
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Node / React
+.next/
+.npm/
+.pnpm-store/
+.turbo/
+.yarn/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+.parcel-cache/
+.svelte-kit/
+.vite/
+coverage/
+dist/
+build/
+node_modules/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Generated local config output
+frontend/vite.config.d.ts
+frontend/vite.config.js
+
+# Local data
+*.sqlite3
+*.db
+backend/tracker.db
+backend/tracker.db-*

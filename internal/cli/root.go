@@ -37,6 +37,10 @@ func NewRootCmd() *cobra.Command {
 	)
 
 	cmd.AddCommand(newConfigCmd(opts))
+	cmd.AddCommand(newListCmd(opts))
+	cmd.AddCommand(newRateCmd(opts))
+	cmd.AddCommand(newRatePromptCmd(opts))
+	cmd.AddCommand(newShowCmd(opts))
 	cmd.AddCommand(newSpotifyCmd(opts))
 	cmd.AddCommand(newSyncCmd(opts))
 

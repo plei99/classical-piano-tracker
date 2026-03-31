@@ -38,13 +38,31 @@ export interface DashboardResponse {
   recent_listens: ListeningEventRead[];
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "");
+}
+
+export function buildApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (!API_BASE_URL) {
+    return normalizedPath;
+  }
+
+  return `${normalizeBaseUrl(API_BASE_URL)}${normalizedPath}`;
+}
 
 export async function getDashboard(): Promise<DashboardResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/dashboard`);
+  const response = await fetch(buildApiUrl("/api/dashboard"));
   if (!response.ok) {
     throw new Error(`Dashboard request failed with ${response.status}`);
   }
   return response.json() as Promise<DashboardResponse>;
 }
 
+export function getSpotifyConnectUrl(returnTo: string): string {
+  const url = new URL(buildApiUrl("/api/spotify/login"), window.location.origin);
+  url.searchParams.set("return_to", returnTo);
+  return url.toString();
+}

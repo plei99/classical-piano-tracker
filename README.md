@@ -24,6 +24,8 @@ The initial API includes:
 - `GET /api/dashboard`
 - `GET /api/performances`
 - `GET /api/listens`
+- `GET /api/spotify/login`
+- `GET /api/spotify/callback`
 - `POST /api/dev/seed`
 
 ### Run the backend
@@ -33,6 +35,12 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
+uvicorn app.main:app --reload
+```
+
+To enable Spotify OAuth locally, copy `backend/.env.example` to `backend/.env` and set the Spotify app credentials. The backend reads `backend/.env` automatically, so a normal Uvicorn start is enough:
+
+```bash
 uvicorn app.main:app --reload
 ```
 
@@ -54,7 +62,7 @@ npm install
 npm run dev
 ```
 
-If needed, override the backend origin with:
+By default, the Vite dev server proxies `/api` requests to `http://127.0.0.1:8000`, so the dashboard fetches and Spotify connect flow work without extra frontend env configuration. If needed, override the backend origin with:
 
 ```bash
 VITE_API_BASE_URL=http://127.0.0.1:8000

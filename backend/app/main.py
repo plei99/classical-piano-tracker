@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
@@ -9,6 +11,7 @@ from .database import Base, engine, get_session
 from .models import ListeningEvent, Performance
 from .schemas import DashboardResponse, HealthResponse, ListeningEventRead, PerformanceSummary, StatsResponse
 from .seed import seed_sample_data
+from .services.spotify import build_authorize_url, exchange_code_for_recent_tracks, import_recent_tracks, resolve_return_to
 
 
 @asynccontextmanager
@@ -50,6 +53,21 @@ def build_performance_summary(row: tuple[Performance, int, int | None, object | 
         listen_count=listen_count,
         total_minutes=round((total_ms or 0) / 60000, 1),
         last_heard_at=last_heard_at,
+    )
+
+
+def with_query_params(url: str, **params: str) -> str:
+    split_result = urlsplit(url)
+    query = dict(parse_qsl(split_result.query, keep_blank_values=True))
+    query.update(params)
+    return urlunsplit(
+        (
+            split_result.scheme,
+            split_result.netloc,
+            split_result.path,
+            urlencode(query),
+            split_result.fragment,
+        )
     )
 
 
@@ -163,3 +181,67 @@ def reseed(session: Session = Depends(get_session)) -> HealthResponse:
     seed_sample_data(session)
     return HealthResponse(status="ok")
 
+
+@app.get("/api/spotify/login")
+def spotify_login(return_to: str | None = None) -> RedirectResponse:
+    authorize_url = build_authorize_url(return_to)
+    return RedirectResponse(authorize_url, status_code=302)
+
+
+@app.get("/api/spotify/callback")
+def spotify_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    session: Session = Depends(get_session),
+) -> RedirectResponse:
+    try:
+        return_to = resolve_return_to(state)
+    except HTTPException:
+        return_to = "http://127.0.0.1:5173"
+
+    if error:
+        redirect_url = with_query_params(
+            return_to,
+            spotify="error",
+            message=error,
+        )
+        return RedirectResponse(redirect_url, status_code=302)
+
+    if not code:
+        redirect_url = with_query_params(
+            return_to,
+            spotify="error",
+            message="Missing Spotify authorization code.",
+        )
+        return RedirectResponse(redirect_url, status_code=302)
+
+    try:
+        tracks = exchange_code_for_recent_tracks(code)
+        summary = import_recent_tracks(session, tracks)
+    except HTTPException as exc:
+        session.rollback()
+        message = str(exc.detail).strip() or "Spotify import failed."
+        redirect_url = with_query_params(
+            return_to,
+            spotify="error",
+            message=message,
+        )
+        return RedirectResponse(redirect_url, status_code=302)
+    except Exception as exc:
+        session.rollback()
+        message = str(exc).strip() or "Spotify import failed."
+        redirect_url = with_query_params(
+            return_to,
+            spotify="error",
+            message=message,
+        )
+        return RedirectResponse(redirect_url, status_code=302)
+
+    redirect_url = with_query_params(
+        return_to,
+        spotify="connected",
+        imported=str(summary.imported_count),
+        skipped=str(summary.skipped_count),
+    )
+    return RedirectResponse(redirect_url, status_code=302)

@@ -1,9 +1,14 @@
 import { useEffect, useState } from "react";
 
 import { StatCard } from "./components/StatCard";
-import { DashboardResponse, getDashboard } from "./lib/api";
+import { DashboardResponse, getDashboard, getSpotifyConnectUrl } from "./lib/api";
 
 const statAccents = ["#a86d1d", "#1d4f4b", "#6d2e3b", "#3f6ea5"];
+
+interface SpotifyBannerState {
+  tone: "success" | "error";
+  message: string;
+}
 
 function formatDateTime(value: string | null): string {
   if (!value) {
@@ -24,6 +29,7 @@ export default function App() {
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [spotifyBanner, setSpotifyBanner] = useState<SpotifyBannerState | null>(null);
 
   async function loadDashboard() {
     setLoading(true);
@@ -44,6 +50,34 @@ export default function App() {
   }
 
   useEffect(() => {
+    const currentUrl = new URL(window.location.href);
+    const spotifyState = currentUrl.searchParams.get("spotify");
+    if (spotifyState === "connected") {
+      const importedCount = currentUrl.searchParams.get("imported") ?? "0";
+      const skippedCount = currentUrl.searchParams.get("skipped") ?? "0";
+      setSpotifyBanner({
+        tone: "success",
+        message: `Spotify connected. Imported ${importedCount} recent listens and skipped ${skippedCount} duplicates.`,
+      });
+    }
+
+    if (spotifyState === "error") {
+      const message =
+        currentUrl.searchParams.get("message") ?? "Spotify connection failed.";
+      setSpotifyBanner({
+        tone: "error",
+        message,
+      });
+    }
+
+    if (spotifyState) {
+      currentUrl.searchParams.delete("spotify");
+      currentUrl.searchParams.delete("imported");
+      currentUrl.searchParams.delete("skipped");
+      currentUrl.searchParams.delete("message");
+      window.history.replaceState({}, "", currentUrl.toString());
+    }
+
     void loadDashboard();
   }, []);
 
@@ -76,15 +110,26 @@ export default function App() {
                 with seeded sample data so the dashboard has immediate shape.
               </p>
             </div>
-            <button
-              className="inline-flex items-center justify-center rounded-full border border-ink/10 bg-ink px-5 py-3 text-sm font-semibold text-parchment transition hover:bg-claret"
-              onClick={() => {
-                void loadDashboard();
-              }}
-              type="button"
-            >
-              Refresh dashboard
-            </button>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button
+                className="inline-flex items-center justify-center rounded-full bg-[#1db954] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#169c46]"
+                onClick={() => {
+                  window.location.assign(getSpotifyConnectUrl(window.location.href));
+                }}
+                type="button"
+              >
+                Connect to Spotify
+              </button>
+              <button
+                className="inline-flex items-center justify-center rounded-full border border-ink/10 bg-ink px-5 py-3 text-sm font-semibold text-parchment transition hover:bg-claret"
+                onClick={() => {
+                  void loadDashboard();
+                }}
+                type="button"
+              >
+                Refresh dashboard
+              </button>
+            </div>
           </div>
         </section>
 
@@ -184,6 +229,18 @@ export default function App() {
         {error ? (
           <div className="mt-6 rounded-2xl border border-claret/20 bg-claret/10 px-5 py-4 text-sm text-claret">
             Failed to load backend data: {error}
+          </div>
+        ) : null}
+
+        {spotifyBanner ? (
+          <div
+            className={`mt-6 rounded-2xl px-5 py-4 text-sm ${
+              spotifyBanner.tone === "success"
+                ? "border border-pine/20 bg-pine/10 text-pine"
+                : "border border-claret/20 bg-claret/10 text-claret"
+            }`}
+          >
+            {spotifyBanner.message}
           </div>
         ) : null}
       </main>

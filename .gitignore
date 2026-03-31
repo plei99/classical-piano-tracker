@@ -63,3 +63,6 @@ frontend/vite.config.js
 *.db
 backend/tracker.db
 backend/tracker.db-*
+
+# Go build output
+/tracker

@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 //go:embed schema.sql
@@ -12,6 +15,12 @@ var schemaSQL string
 
 // Open opens a SQLite database using the configured pure-Go driver.
 func Open(path string) (*sql.DB, error) {
+	if path != "" && path != ":memory:" && !strings.HasPrefix(path, "file:") {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return nil, fmt.Errorf("create sqlite directory for %q: %w", path, err)
+		}
+	}
+
 	db, err := sql.Open(DriverName, path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database %q: %w", path, err)

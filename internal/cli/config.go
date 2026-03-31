@@ -4,11 +4,13 @@ import (
 	"fmt"
 
 	"github.com/plei99/classical-piano-tracker/internal/config"
+	"github.com/plei99/classical-piano-tracker/internal/paths"
 	"github.com/spf13/cobra"
 )
 
 type rootOptions struct {
 	configPath string
+	dbPath     string
 }
 
 func (o *rootOptions) resolveConfigPath() (string, error) {
@@ -17,6 +19,14 @@ func (o *rootOptions) resolveConfigPath() (string, error) {
 	}
 
 	return config.DefaultPath()
+}
+
+func (o *rootOptions) resolveDBPath() (string, error) {
+	if o.dbPath != "" {
+		return o.dbPath, nil
+	}
+
+	return paths.DefaultDBPath()
 }
 
 func newConfigCmd(opts *rootOptions) *cobra.Command {

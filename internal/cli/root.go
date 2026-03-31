@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/plei99/classical-piano-tracker/internal/config"
+	"github.com/plei99/classical-piano-tracker/internal/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -9,6 +10,7 @@ import (
 func NewRootCmd() *cobra.Command {
 	opts := &rootOptions{}
 	defaultConfigPath, _ := config.DefaultPath()
+	defaultDBPath, _ := paths.DefaultDBPath()
 
 	cmd := &cobra.Command{
 		Use:           "tracker",
@@ -27,9 +29,16 @@ func NewRootCmd() *cobra.Command {
 		defaultConfigPath,
 		"path to the config file",
 	)
+	cmd.PersistentFlags().StringVar(
+		&opts.dbPath,
+		"db",
+		defaultDBPath,
+		"path to the SQLite database file",
+	)
 
 	cmd.AddCommand(newConfigCmd(opts))
 	cmd.AddCommand(newSpotifyCmd(opts))
+	cmd.AddCommand(newSyncCmd(opts))
 
 	return cmd
 }

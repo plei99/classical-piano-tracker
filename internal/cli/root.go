@@ -43,6 +43,7 @@ func NewRootCmd() *cobra.Command {
 	cmd.AddCommand(newShowCmd(opts))
 	cmd.AddCommand(newSpotifyCmd(opts))
 	cmd.AddCommand(newSyncCmd(opts))
+	cmd.AddCommand(newTUICmd(opts))
 
 	return cmd
 }

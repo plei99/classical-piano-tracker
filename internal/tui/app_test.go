@@ -87,6 +87,75 @@ func TestRenderErrorState(t *testing.T) {
 	}
 }
 
+func TestLayoutUsesVerticalModeForNarrowWindows(t *testing.T) {
+	t.Parallel()
+
+	model := Model{width: 70, height: 24}
+	layout := model.layout()
+	if !layout.vertical {
+		t.Fatal("layout() should use vertical mode for narrow widths")
+	}
+	if layout.listWidth != layout.detailWidth {
+		t.Fatal("vertical layout should use the same pane width")
+	}
+}
+
+func TestLayoutUsesHorizontalModeForWideWindows(t *testing.T) {
+	t.Parallel()
+
+	model := Model{width: 140, height: 30}
+	layout := model.layout()
+	if layout.vertical {
+		t.Fatal("layout() should use horizontal mode for wide widths")
+	}
+	if layout.listHeight != layout.detailHeight {
+		t.Fatal("horizontal layout should use the full height for both panes")
+	}
+}
+
+func TestVisibleTracksCentersSelection(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		tracks:        make([]db.Track, 12),
+		selectedIndex: 6,
+	}
+
+	visible, offset, hiddenAbove, hiddenBelow := model.visibleTracks(11)
+	if len(visible) == 0 {
+		t.Fatal("visibleTracks() should return visible rows")
+	}
+	if offset == 0 {
+		t.Fatal("visibleTracks() should scroll when selection is in the middle")
+	}
+	if !hiddenAbove || !hiddenBelow {
+		t.Fatal("visibleTracks() should report hidden rows above and below")
+	}
+}
+
+func TestViewIncludesScrollableHint(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		width:  80,
+		height: 16,
+		tracks: []db.Track{
+			{ID: 1, TrackName: "One", Artists: `["A"]`, LastPlayedAt: 100},
+			{ID: 2, TrackName: "Two", Artists: `["B"]`, LastPlayedAt: 100},
+			{ID: 3, TrackName: "Three", Artists: `["C"]`, LastPlayedAt: 100},
+			{ID: 4, TrackName: "Four", Artists: `["D"]`, LastPlayedAt: 100},
+			{ID: 5, TrackName: "Five", Artists: `["E"]`, LastPlayedAt: 100},
+			{ID: 6, TrackName: "Six", Artists: `["F"]`, LastPlayedAt: 100},
+		},
+		ratingKnown: true,
+	}
+
+	view := model.View()
+	if !strings.Contains(view, "Recent local listening history") {
+		t.Fatalf("View() = %q, want main header", view)
+	}
+}
+
 func TestLoadRatingCmdNoRows(t *testing.T) {
 	t.Parallel()
 

@@ -5,7 +5,7 @@ Initial full-stack scaffold for a personal app that tracks classical piano perfo
 ## Structure
 
 ```text
-backend/   FastAPI + SQLite API with seeded demo data
+backend/   FastAPI + SQLite API
 frontend/  React + Vite + Tailwind dashboard
 ```
 
@@ -26,7 +26,6 @@ The initial API includes:
 - `GET /api/listens`
 - `GET /api/spotify/login`
 - `GET /api/spotify/callback`
-- `POST /api/dev/seed`
 
 ### Run the backend
 
@@ -44,7 +43,7 @@ To enable Spotify OAuth locally, copy `backend/.env.example` to `backend/.env` a
 uvicorn app.main:app --reload
 ```
 
-The SQLite database is stored at `backend/tracker.db`. On first startup, the app creates tables and seeds a small set of sample performances and listening events.
+The SQLite database is stored at `backend/tracker.db`. On first startup, the app creates tables and starts empty until you import listening history from Spotify.
 
 ## Frontend
 

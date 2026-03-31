@@ -10,15 +10,12 @@ from sqlalchemy.orm import Session, joinedload
 from .database import Base, engine, get_session
 from .models import ListeningEvent, Performance
 from .schemas import DashboardResponse, HealthResponse, ListeningEventRead, PerformanceSummary, StatsResponse
-from .seed import seed_sample_data
 from .services.spotify import build_authorize_url, exchange_code_for_recent_tracks, import_recent_tracks, resolve_return_to
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
-    with Session(engine) as session:
-        seed_sample_data(session)
     yield
 
 
@@ -174,12 +171,6 @@ def list_listens(session: Session = Depends(get_session)) -> list[ListeningEvent
         )
         for listen in listens
     ]
-
-
-@app.post("/api/dev/seed", response_model=HealthResponse)
-def reseed(session: Session = Depends(get_session)) -> HealthResponse:
-    seed_sample_data(session)
-    return HealthResponse(status="ok")
 
 
 @app.get("/api/spotify/login")

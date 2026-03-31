@@ -95,7 +95,10 @@ export default function App() {
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(168,109,29,0.18),_transparent_32%),linear-gradient(180deg,_#efe6d8_0%,_#f8f4ed_42%,_#ebe3d6_100%)] text-ink">
       <main className="mx-auto flex min-h-screen max-w-7xl flex-col px-6 py-8 sm:px-10 lg:px-12">
         <section className="relative overflow-hidden rounded-[2.5rem] border border-white/60 bg-white/70 px-6 py-10 shadow-panel backdrop-blur sm:px-10">
-          <div className="absolute inset-y-0 right-0 hidden w-1/3 bg-[radial-gradient(circle_at_center,_rgba(29,79,75,0.18),_transparent_60%)] lg:block" />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 right-0 hidden w-1/3 bg-[radial-gradient(circle_at_center,_rgba(29,79,75,0.18),_transparent_60%)] lg:block"
+          />
           <p className="text-xs uppercase tracking-[0.32em] text-ink/50">
             Personal listening archive
           </p>
@@ -105,9 +108,9 @@ export default function App() {
                 Track the piano performances you keep returning to.
               </h1>
               <p className="mt-5 max-w-2xl text-base leading-7 text-ink/70">
-                This starter app turns Spotify listening history into a personal ledger
-                of pianists, works, and repeat listening patterns. The backend ships
-                with seeded sample data so the dashboard has immediate shape.
+                Turn your Spotify listening history into a personal ledger of
+                pianists, works, and repeat listening patterns. Connect Spotify to
+                import your recent listens and start building the archive.
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
@@ -168,33 +171,40 @@ export default function App() {
             </div>
 
             <div className="mt-8 space-y-4">
-              {dashboard?.top_performances.map((performance) => (
-                <article
-                  className="rounded-[1.5rem] border border-ink/10 bg-parchment/70 p-5"
-                  key={performance.id}
-                >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="text-sm uppercase tracking-[0.22em] text-claret">
-                        {performance.composer}
-                      </p>
-                      <h3 className="mt-2 font-display text-2xl leading-tight">
-                        {performance.work_title}
-                      </h3>
-                      <p className="mt-2 text-sm text-ink/70">
-                        {performance.pianist} · {performance.album_name}
-                      </p>
+              {dashboard?.top_performances.length ? (
+                dashboard.top_performances.map((performance) => (
+                  <article
+                    className="rounded-[1.5rem] border border-ink/10 bg-parchment/70 p-5"
+                    key={performance.id}
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm uppercase tracking-[0.22em] text-claret">
+                          {performance.composer}
+                        </p>
+                        <h3 className="mt-2 font-display text-2xl leading-tight">
+                          {performance.work_title}
+                        </h3>
+                        <p className="mt-2 text-sm text-ink/70">
+                          {performance.pianist} · {performance.album_name}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-white/80 px-4 py-3 text-sm text-ink/70">
+                        <div>{performance.listen_count} listens</div>
+                        <div>{formatMinutes(performance.total_minutes)}</div>
+                      </div>
                     </div>
-                    <div className="rounded-2xl bg-white/80 px-4 py-3 text-sm text-ink/70">
-                      <div>{performance.listen_count} listens</div>
-                      <div>{formatMinutes(performance.total_minutes)}</div>
-                    </div>
-                  </div>
-                  <p className="mt-4 text-sm text-ink/60">
-                    Last heard {formatDateTime(performance.last_heard_at)}
-                  </p>
-                </article>
-              ))}
+                    <p className="mt-4 text-sm text-ink/60">
+                      Last heard {formatDateTime(performance.last_heard_at)}
+                    </p>
+                  </article>
+                ))
+              ) : (
+                <div className="rounded-[1.5rem] border border-dashed border-ink/15 bg-parchment/50 p-6 text-sm text-ink/60">
+                  No performances yet. Import Spotify listens to start ranking your
+                  most replayed recordings.
+                </div>
+              )}
             </div>
           </div>
 
@@ -205,23 +215,30 @@ export default function App() {
             <h2 className="mt-2 font-display text-3xl text-ink">Listening log</h2>
 
             <div className="mt-8 space-y-4">
-              {dashboard?.recent_listens.map((listen) => (
-                <div
-                  className="rounded-[1.5rem] border border-ink/10 bg-white/70 p-4"
-                  key={listen.id}
-                >
-                  <p className="text-sm uppercase tracking-[0.22em] text-pine">
-                    {listen.composer}
-                  </p>
-                  <p className="mt-1 font-semibold text-ink">{listen.work_title}</p>
-                  <p className="mt-1 text-sm text-ink/70">
-                    {listen.pianist} · {formatMinutes(listen.ms_played / 60000)}
-                  </p>
-                  <p className="mt-2 text-sm text-ink/60">
-                    {formatDateTime(listen.listened_at)}
-                  </p>
+              {dashboard?.recent_listens.length ? (
+                dashboard.recent_listens.map((listen) => (
+                  <div
+                    className="rounded-[1.5rem] border border-ink/10 bg-white/70 p-4"
+                    key={listen.id}
+                  >
+                    <p className="text-sm uppercase tracking-[0.22em] text-pine">
+                      {listen.composer}
+                    </p>
+                    <p className="mt-1 font-semibold text-ink">{listen.work_title}</p>
+                    <p className="mt-1 text-sm text-ink/70">
+                      {listen.pianist} · {formatMinutes(listen.ms_played / 60000)}
+                    </p>
+                    <p className="mt-2 text-sm text-ink/60">
+                      {formatDateTime(listen.listened_at)}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-[1.5rem] border border-dashed border-ink/15 bg-white/50 p-6 text-sm text-ink/60">
+                  No listening history yet. Connect Spotify to import your recent
+                  activity.
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </section>

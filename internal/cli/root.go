@@ -29,6 +29,7 @@ func NewRootCmd() *cobra.Command {
 	)
 
 	cmd.AddCommand(newConfigCmd(opts))
+	cmd.AddCommand(newSpotifyCmd(opts))
 
 	return cmd
 }

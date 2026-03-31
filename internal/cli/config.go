@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/plei99/classical-piano-tracker/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -57,8 +59,16 @@ func newConfigValidateCmd(opts *rootOptions) *cobra.Command {
 				return err
 			}
 
-			if _, err := config.LoadAndValidate(path); err != nil {
+			cfg, created, err := ensureLoadedConfig(path)
+			if err != nil {
 				return err
+			}
+
+			if err := cfg.Validate(); err != nil {
+				if created {
+					return createdConfigError(path, fmt.Sprintf("fill the required values, then rerun `tracker --config %q config validate`: %v", path, err))
+				}
+				return fmt.Errorf("invalid config %q: %w", path, err)
 			}
 
 			cmd.Printf("config is valid: %s\n", path)

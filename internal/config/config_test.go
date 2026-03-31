@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 func TestPathFromConfigDir(t *testing.T) {
@@ -62,6 +64,62 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 
 	if string(gotJSON) != string(wantJSON) {
 		t.Fatalf("Load() mismatch = %s, want %s", gotJSON, wantJSON)
+	}
+}
+
+func TestEnsureCreatesDefaultConfigWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "piano-tracker", "config.json")
+
+	created, err := Ensure(path)
+	if err != nil {
+		t.Fatalf("Ensure() error = %v", err)
+	}
+	if !created {
+		t.Fatal("Ensure() created = false, want true")
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Spotify.ClientID != "" || cfg.Spotify.ClientSecret != "" {
+		t.Fatalf("default config should not contain Spotify credentials: %#v", cfg.Spotify)
+	}
+	if len(cfg.PianistsAllowlist) == 0 {
+		t.Fatal("default config should include a populated pianist allowlist")
+	}
+	for _, pianist := range []string{"Martha Argerich", "Lang Lang", "Khatia Buniatishvili", "Alice Sara Ott", "Ivo Pogorelich"} {
+		if !containsString(cfg.PianistsAllowlist, pianist) {
+			t.Fatalf("default config allowlist missing %q", pianist)
+		}
+	}
+	if len(cfg.ArtistsBlocklist) != 0 {
+		t.Fatalf("default config should start with an empty blocklist: %#v", cfg.ArtistsBlocklist)
+	}
+}
+
+func TestEnsureReturnsFalseWhenConfigAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Save(path, &Config{
+		Spotify: SpotifyConfig{
+			ClientID:     "client-id",
+			ClientSecret: "client-secret",
+		},
+		PianistsAllowlist: []string{"Martha Argerich"},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	created, err := Ensure(path)
+	if err != nil {
+		t.Fatalf("Ensure() error = %v", err)
+	}
+	if created {
+		t.Fatal("Ensure() created = true, want false")
 	}
 }
 
@@ -159,4 +217,43 @@ func TestValidateRejectsInvalidTokenAndArtists(t *testing.T) {
 			t.Fatalf("Validate() error = %q, want %q", err, problem)
 		}
 	}
+}
+
+func TestTokenFromOAuthPreservesRefreshData(t *testing.T) {
+	t.Parallel()
+
+	previous := &Token{
+		AccessToken:  "old-access",
+		RefreshToken: "old-refresh",
+		TokenType:    "Bearer",
+		Expiry:       time.Date(2026, time.March, 31, 12, 0, 0, 0, time.UTC),
+	}
+	current := &oauth2.Token{
+		AccessToken: "new-access",
+		TokenType:   "",
+	}
+
+	got := TokenFromOAuth(current, previous)
+	if got.AccessToken != "new-access" {
+		t.Fatalf("TokenFromOAuth() access_token = %q, want new-access", got.AccessToken)
+	}
+	if got.RefreshToken != "old-refresh" {
+		t.Fatalf("TokenFromOAuth() refresh_token = %q, want old-refresh", got.RefreshToken)
+	}
+	if got.TokenType != "Bearer" {
+		t.Fatalf("TokenFromOAuth() token_type = %q, want Bearer", got.TokenType)
+	}
+	if !got.Expiry.Equal(previous.Expiry) {
+		t.Fatalf("TokenFromOAuth() expiry = %v, want %v", got.Expiry, previous.Expiry)
+	}
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+
+	return false
 }

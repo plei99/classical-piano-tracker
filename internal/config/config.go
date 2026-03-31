@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 const (
@@ -18,6 +20,93 @@ const (
 	fileMode   = 0o600
 	dirMode    = 0o700
 )
+
+var defaultPianistsAllowlist = []string{
+	"Martha Argerich",
+	"Vladimir Horowitz",
+	"Arthur Rubinstein",
+	"Sviatoslav Richter",
+	"Emil Gilels",
+	"Glenn Gould",
+	"Alfred Brendel",
+	"Maurizio Pollini",
+	"Krystian Zimerman",
+	"Evgeny Kissin",
+	"Daniil Trifonov",
+	"Murray Perahia",
+	"Maria Joao Pires",
+	"Piotr Anderszewski",
+	"Radu Lupu",
+	"Claudio Arrau",
+	"Wilhelm Kempff",
+	"Arturo Benedetti Michelangeli",
+	"Alfred Cortot",
+	"Dinu Lipatti",
+	"Josef Hofmann",
+	"Ignaz Friedman",
+	"Benno Moiseiwitsch",
+	"Walter Gieseking",
+	"Myra Hess",
+	"Annie Fischer",
+	"Alicia de Larrocha",
+	"Clara Haskil",
+	"Leon Fleisher",
+	"Van Cliburn",
+	"Byron Janis",
+	"Earl Wild",
+	"Garrick Ohlsson",
+	"Jorge Bolet",
+	"Gyorgy Cziffra",
+	"Grigory Sokolov",
+	"Arcadi Volodos",
+	"Nikolai Lugansky",
+	"Leif Ove Andsnes",
+	"Mitsuko Uchida",
+	"Andras Schiff",
+	"Stephen Hough",
+	"Marc-Andre Hamelin",
+	"Igor Levit",
+	"Yuja Wang",
+	"Seong-Jin Cho",
+	"Yunchan Lim",
+	"Beatrice Rana",
+	"Alexandre Kantorow",
+	"Jan Lisiecki",
+	"Boris Berezovsky",
+	"Denis Matsuev",
+	"Paul Lewis",
+	"Pierre-Laurent Aimard",
+	"Lars Vogt",
+	"Jean-Efflam Bavouzet",
+	"Wilhelm Backhaus",
+	"Samson Francois",
+	"Arthur Schnabel",
+	"Edwin Fischer",
+	"Geza Anda",
+	"Lazar Berman",
+	"Shura Cherkassky",
+	"Josef Lhevinne",
+	"Nelson Freire",
+	"Nelson Goerner",
+	"Angela Hewitt",
+	"Behzod Abduraimov",
+	"Kirill Gerstein",
+	"Emanuel Ax",
+	"Barry Douglas",
+	"Menahem Pressler",
+	"Idil Biret",
+	"Fou Ts'ong",
+	"Abbey Simon",
+	"Pascal Roge",
+	"Vladimir Ashkenazy",
+	"Yefim Bronfman",
+	"Vikingur Olafsson",
+	"Stephen Kovacevich",
+	"Lang Lang",
+	"Khatia Buniatishvili",
+	"Alice Sara Ott",
+	"Ivo Pogorelich",
+}
 
 // Config stores local application state and curation filters.
 type Config struct {
@@ -50,6 +139,59 @@ func (e *ValidationError) Error() string {
 	return strings.Join(e.Problems, "; ")
 }
 
+// Default returns the first-run config template written when no file exists yet.
+func Default() *Config {
+	return &Config{
+		Spotify:           SpotifyConfig{},
+		PianistsAllowlist: append([]string(nil), defaultPianistsAllowlist...),
+		ArtistsBlocklist:  []string{},
+	}
+}
+
+// OAuthToken returns the config token as an oauth2 token.
+func (t *Token) OAuthToken() *oauth2.Token {
+	if t == nil {
+		return nil
+	}
+
+	return &oauth2.Token{
+		AccessToken:  t.AccessToken,
+		RefreshToken: t.RefreshToken,
+		TokenType:    t.TokenType,
+		Expiry:       t.Expiry,
+	}
+}
+
+// TokenFromOAuth converts an oauth2 token into the persisted config format.
+// If the new token omits refresh data, the previous value is retained.
+func TokenFromOAuth(token *oauth2.Token, previous *Token) *Token {
+	if token == nil {
+		return nil
+	}
+
+	refreshToken := token.RefreshToken
+	if refreshToken == "" && previous != nil {
+		refreshToken = previous.RefreshToken
+	}
+
+	tokenType := token.TokenType
+	if tokenType == "" && previous != nil {
+		tokenType = previous.TokenType
+	}
+
+	expiry := token.Expiry
+	if expiry.IsZero() && previous != nil {
+		expiry = previous.Expiry
+	}
+
+	return &Token{
+		AccessToken:  token.AccessToken,
+		RefreshToken: refreshToken,
+		TokenType:    tokenType,
+		Expiry:       expiry,
+	}
+}
+
 // PathFromConfigDir returns the default config path for a given config root.
 func PathFromConfigDir(configDir string) string {
 	return filepath.Join(configDir, appDirName, configName)
@@ -63,6 +205,24 @@ func DefaultPath() (string, error) {
 	}
 
 	return PathFromConfigDir(configDir), nil
+}
+
+// Ensure creates a default config file when one does not already exist.
+// It reports whether a new file was created.
+func Ensure(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("stat config %q: %w", path, err)
+	}
+
+	if err := Save(path, Default()); err != nil {
+		return false, fmt.Errorf("create default config %q: %w", path, err)
+	}
+
+	return true, nil
 }
 
 // Load reads and decodes a config file from disk.
@@ -194,6 +354,48 @@ func (c *Config) Validate() error {
 		if c.Spotify.Token.Expiry.IsZero() {
 			problems = append(problems, "spotify.token.expiry is required when spotify.token is present")
 		}
+	}
+
+	if len(problems) > 0 {
+		return &ValidationError{Problems: problems}
+	}
+
+	return nil
+}
+
+// ValidateClientCredentials checks only the Spotify credentials required to start OAuth.
+func (c SpotifyConfig) ValidateClientCredentials() error {
+	var problems []string
+
+	if strings.TrimSpace(c.ClientID) == "" {
+		problems = append(problems, "spotify.client_id is required")
+	}
+
+	if strings.TrimSpace(c.ClientSecret) == "" {
+		problems = append(problems, "spotify.client_secret is required")
+	}
+
+	if len(problems) > 0 {
+		return &ValidationError{Problems: problems}
+	}
+
+	return nil
+}
+
+// ValidateStoredToken checks the persisted Spotify token fields needed to create an authenticated client.
+func (c SpotifyConfig) ValidateStoredToken() error {
+	if c.Token == nil {
+		return &ValidationError{Problems: []string{"spotify.token is required"}}
+	}
+
+	var problems []string
+
+	if strings.TrimSpace(c.Token.AccessToken) == "" {
+		problems = append(problems, "spotify.token.access_token is required")
+	}
+
+	if c.Token.Expiry.IsZero() {
+		problems = append(problems, "spotify.token.expiry is required")
 	}
 
 	if len(problems) > 0 {

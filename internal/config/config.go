@@ -100,7 +100,7 @@ var defaultPianistsAllowlist = []string{
 	"Pascal Roge",
 	"Vladimir Ashkenazy",
 	"Yefim Bronfman",
-	"Vikingur Olafsson",
+	"Víkingur Ólafsson",
 	"Stephen Kovacevich",
 	"Lang Lang",
 	"Khatia Buniatishvili",

@@ -8,12 +8,13 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/plei99/classical-piano-tracker/internal/db"
+	"github.com/plei99/classical-piano-tracker/internal/syncer"
 )
 
 func TestUpdateTracksLoadedTriggersRatingLoad(t *testing.T) {
 	t.Parallel()
 
-	model := NewModel(nil)
+	model := NewModel(nil, nil, nil)
 	msg := tracksLoadedMsg{
 		tracks: []db.Track{
 			{ID: 1, TrackName: "Track One", Artists: `["Artist One"]`, LastPlayedAt: 100},
@@ -65,6 +66,174 @@ func TestUpdateRatingLoadedHandlesNoRows(t *testing.T) {
 	}
 	if !got.ratingKnown {
 		t.Fatal("ratingKnown should be true when nil rating is returned")
+	}
+}
+
+func TestSyncKeyStartsAsyncSync(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(nil, func(context.Context) (syncer.Stats, error) {
+		return syncer.Stats{Fetched: 5, Accepted: 2, Inserted: 1, Updated: 1}, nil
+	}, nil)
+	model.tracks = []db.Track{{ID: 1}}
+	model.ratingKnown = true
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	got := updated.(Model)
+	if !got.syncing {
+		t.Fatal("syncing should be true after pressing s")
+	}
+	if cmd == nil {
+		t.Fatal("expected sync command")
+	}
+
+	msg, ok := cmd().(syncFinishedMsg)
+	if !ok {
+		t.Fatalf("sync command returned %T, want syncFinishedMsg", msg)
+	}
+	if msg.stats.Fetched != 5 || msg.err != nil {
+		t.Fatalf("unexpected syncFinishedMsg: %+v", msg)
+	}
+}
+
+func TestSyncFinishedReloadsTracks(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		queries:     newTestQueries(t),
+		tracks:      []db.Track{{ID: 1}},
+		syncing:     true,
+		ratingKnown: true,
+	}
+
+	updated, cmd := model.Update(syncFinishedMsg{
+		stats: syncer.Stats{Fetched: 5, Accepted: 2, Inserted: 1, Updated: 1},
+	})
+	got := updated.(Model)
+	if got.syncing {
+		t.Fatal("syncing should be false after syncFinishedMsg")
+	}
+	if !got.loadingTracks {
+		t.Fatal("loadingTracks should be true while refreshing after sync")
+	}
+	if !strings.Contains(got.statusLine(), "Sync complete.") {
+		t.Fatalf("statusLine() = %q, want sync completion", got.statusLine())
+	}
+	if cmd == nil {
+		t.Fatal("expected track reload command after successful sync")
+	}
+}
+
+func TestSyncFinishedErrorSetsStatus(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		tracks:      []db.Track{{ID: 1}},
+		syncing:     true,
+		ratingKnown: true,
+	}
+
+	updated, _ := model.Update(syncFinishedMsg{err: errors.New("bad token")})
+	got := updated.(Model)
+	if got.syncing {
+		t.Fatal("syncing should be false after a failed sync")
+	}
+	if !got.statusIsError {
+		t.Fatal("status should be marked as error after failed sync")
+	}
+	if !strings.Contains(got.statusLine(), "Sync failed: bad token") {
+		t.Fatalf("statusLine() = %q, want sync error text", got.statusLine())
+	}
+}
+
+func TestEnterStartsRatingEditorWithExistingRating(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		tracks:         []db.Track{{ID: 1, TrackName: "One", Artists: `["A"]`}},
+		selectedRating: &db.Rating{TrackID: 1, Stars: 4, Opinion: "Warm"},
+		ratingKnown:    true,
+	}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(Model)
+	if !got.editingRating {
+		t.Fatal("editingRating should be true after pressing enter")
+	}
+	if got.draftStars != 4 || got.draftOpinion != "Warm" {
+		t.Fatalf("unexpected rating draft: stars=%d opinion=%q", got.draftStars, got.draftOpinion)
+	}
+}
+
+func TestRatingEditorHandlesInputAndSave(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(nil, nil, func(_ context.Context, arg db.UpsertRatingParams) (db.Rating, error) {
+		return db.Rating{
+			TrackID:   arg.TrackID,
+			Stars:     arg.Stars,
+			Opinion:   arg.Opinion,
+			UpdatedAt: arg.UpdatedAt,
+		}, nil
+	})
+	model.tracks = []db.Track{{ID: 7, TrackName: "One", Artists: `["A"]`}}
+	model.ratingKnown = true
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(Model)
+	if !got.editingRating {
+		t.Fatal("editor should open")
+	}
+
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	got = updated.(Model)
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Great")})
+	got = updated.(Model)
+
+	updated, cmd := got.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got = updated.(Model)
+	if got.editingRating {
+		t.Fatal("editor should close when save starts")
+	}
+	if !got.savingRating {
+		t.Fatal("savingRating should be true while save command is in flight")
+	}
+	if cmd == nil {
+		t.Fatal("expected save command")
+	}
+
+	msg, ok := cmd().(ratingSavedMsg)
+	if !ok {
+		t.Fatalf("save command returned %T, want ratingSavedMsg", msg)
+	}
+	if msg.trackID != 7 || msg.rating == nil || msg.rating.Stars != 5 || msg.rating.Opinion != "Great" {
+		t.Fatalf("unexpected ratingSavedMsg: %+v", msg)
+	}
+}
+
+func TestRatingSavedUpdatesSelection(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		tracks:         []db.Track{{ID: 9}},
+		savingRating:   true,
+		ratingKnown:    false,
+		selectedRating: nil,
+	}
+
+	updated, _ := model.Update(ratingSavedMsg{
+		trackID: 9,
+		rating:  &db.Rating{TrackID: 9, Stars: 3, Opinion: "Good", UpdatedAt: 10},
+	})
+	got := updated.(Model)
+	if got.savingRating {
+		t.Fatal("savingRating should be false after ratingSavedMsg")
+	}
+	if got.selectedRating == nil || got.selectedRating.Stars != 3 {
+		t.Fatalf("selectedRating = %+v, want saved rating", got.selectedRating)
+	}
+	if !got.ratingKnown {
+		t.Fatal("ratingKnown should be true after a successful save")
 	}
 }
 
@@ -156,6 +325,28 @@ func TestViewIncludesScrollableHint(t *testing.T) {
 	}
 }
 
+func TestViewShowsRatingEditor(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		width:         120,
+		height:        28,
+		tracks:        []db.Track{{ID: 1, TrackName: "One", Artists: `["A"]`}},
+		ratingKnown:   true,
+		editingRating: true,
+		draftStars:    5,
+		draftOpinion:  "Very good",
+	}
+
+	view := model.View()
+	if !strings.Contains(view, "Rating Editor") {
+		t.Fatalf("View() = %q, want rating editor", view)
+	}
+	if !strings.Contains(view, "Stars: 5/5") {
+		t.Fatalf("View() = %q, want draft stars", view)
+	}
+}
+
 func TestLoadRatingCmdNoRows(t *testing.T) {
 	t.Parallel()
 
@@ -182,6 +373,25 @@ func TestLoadRatingCmdNoRows(t *testing.T) {
 	if ratingMsg.trackID != 7 || ratingMsg.rating != nil || ratingMsg.err != nil {
 		t.Fatalf("unexpected ratingLoadedMsg: %+v", ratingMsg)
 	}
+}
+
+func newTestQueries(t *testing.T) *db.Queries {
+	t.Helper()
+
+	path := t.TempDir() + "/tracker.db"
+	conn, err := db.Open(path)
+	if err != nil {
+		t.Fatalf("db.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = conn.Close()
+	})
+
+	if err := db.Init(context.Background(), conn); err != nil {
+		t.Fatalf("db.Init() error = %v", err)
+	}
+
+	return db.New(conn)
 }
 
 var _ tea.Model = Model{}

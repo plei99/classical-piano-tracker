@@ -416,3 +416,48 @@ func validateArtists(field string, artists []string) []string {
 
 	return problems
 }
+
+// AddArtist appends an artist name if it is not already present in the list.
+// Matching is case-insensitive and ignores surrounding whitespace.
+func AddArtist(artists []string, artist string) ([]string, bool, error) {
+	trimmed := strings.TrimSpace(artist)
+	if trimmed == "" {
+		return nil, false, errors.New("artist name must not be blank")
+	}
+
+	normalized := normalizeArtistName(trimmed)
+	for _, existing := range artists {
+		if normalizeArtistName(existing) == normalized {
+			return append([]string(nil), artists...), false, nil
+		}
+	}
+
+	updated := append(append([]string(nil), artists...), trimmed)
+	return updated, true, nil
+}
+
+// RemoveArtist removes all matching artist names from the list.
+// Matching is case-insensitive and ignores surrounding whitespace.
+func RemoveArtist(artists []string, artist string) ([]string, bool, error) {
+	trimmed := strings.TrimSpace(artist)
+	if trimmed == "" {
+		return nil, false, errors.New("artist name must not be blank")
+	}
+
+	normalized := normalizeArtistName(trimmed)
+	updated := make([]string, 0, len(artists))
+	removed := false
+	for _, existing := range artists {
+		if normalizeArtistName(existing) == normalized {
+			removed = true
+			continue
+		}
+		updated = append(updated, existing)
+	}
+
+	return updated, removed, nil
+}
+
+func normalizeArtistName(name string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), " "))
+}

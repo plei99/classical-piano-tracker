@@ -248,6 +248,57 @@ func TestTokenFromOAuthPreservesRefreshData(t *testing.T) {
 	}
 }
 
+func TestAddArtistTrimsAndDeduplicatesCaseInsensitively(t *testing.T) {
+	t.Parallel()
+
+	items := []string{"Martha Argerich"}
+	got, added, err := AddArtist(items, "  Daniil Trifonov  ")
+	if err != nil {
+		t.Fatalf("AddArtist() error = %v", err)
+	}
+	if !added {
+		t.Fatal("AddArtist() added = false, want true")
+	}
+	if len(got) != 2 || got[1] != "Daniil Trifonov" {
+		t.Fatalf("AddArtist() = %#v, want appended trimmed artist", got)
+	}
+
+	got, added, err = AddArtist(got, "daniil trifonov")
+	if err != nil {
+		t.Fatalf("AddArtist() error = %v", err)
+	}
+	if added {
+		t.Fatal("AddArtist() added = true, want false for duplicate")
+	}
+	if len(got) != 2 {
+		t.Fatalf("AddArtist() len = %d, want 2", len(got))
+	}
+}
+
+func TestRemoveArtistMatchesCaseInsensitively(t *testing.T) {
+	t.Parallel()
+
+	items := []string{"Martha Argerich", "Daniil Trifonov", "LANG LANG"}
+	got, removed, err := RemoveArtist(items, " lang lang ")
+	if err != nil {
+		t.Fatalf("RemoveArtist() error = %v", err)
+	}
+	if !removed {
+		t.Fatal("RemoveArtist() removed = false, want true")
+	}
+	if containsString(got, "LANG LANG") {
+		t.Fatalf("RemoveArtist() = %#v, want LANG LANG removed", got)
+	}
+
+	got, removed, err = RemoveArtist(got, "Missing Artist")
+	if err != nil {
+		t.Fatalf("RemoveArtist() error = %v", err)
+	}
+	if removed {
+		t.Fatal("RemoveArtist() removed = true, want false for missing artist")
+	}
+}
+
 func containsString(items []string, want string) bool {
 	for _, item := range items {
 		if item == want {

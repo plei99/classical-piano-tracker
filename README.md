@@ -271,6 +271,10 @@ The default OpenAI model is `gpt-5.4`. `OPENAI_MODEL` overrides it.
 - LLM-backed recommendations suggest pianists, not tracks
 - the recommendation flow is only as good as the ratings and comments already in your local database
 
+## Future Work
+
+- make the LLM-backed recommendation layer model-agnostic so it can use providers beyond the current OpenAI-specific integration
+
 ## Command Summary
 
 ```text

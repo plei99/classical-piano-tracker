@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/plei99/classical-piano-tracker/internal/config"
 	"github.com/plei99/classical-piano-tracker/internal/recommend"
 )
 
@@ -76,5 +77,25 @@ func TestSuggestNewPianistsRejectsDiscoveryInputWithoutEnoughRatings(t *testing.
 	}, 5)
 	if err == nil {
 		t.Fatal("SuggestNewPianists() error = nil, want validation error")
+	}
+}
+
+func TestFromConfigFallsBackToConfigKeyAndEnvOverrides(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	client, err := FromConfig(config.OpenAIConfig{APIKey: "config-key"})
+	if err != nil {
+		t.Fatalf("FromConfig() error = %v", err)
+	}
+	if client.apiKey != "config-key" {
+		t.Fatalf("client.apiKey = %q, want config-key", client.apiKey)
+	}
+
+	t.Setenv("OPENAI_API_KEY", "env-key")
+	client, err = FromConfig(config.OpenAIConfig{APIKey: "config-key"})
+	if err != nil {
+		t.Fatalf("FromConfig() error = %v", err)
+	}
+	if client.apiKey != "env-key" {
+		t.Fatalf("client.apiKey = %q, want env-key", client.apiKey)
 	}
 }

@@ -124,7 +124,7 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 				return err
 			}
 			if err := recommend.ValidateDiscoveryInput(summary); err != nil {
-				return err
+				return fmt.Errorf("not enough local rating data for pianist recommendations yet: %w", err)
 			}
 
 			llmClient, err := openai.FromConfig(cfg.OpenAI)

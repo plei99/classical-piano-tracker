@@ -92,15 +92,26 @@ That interactive flow collects:
 
 - Spotify client ID
 - Spotify client secret
-- optional LLM API key for the default OpenAI profile
+- one LLM provider profile:
+  - OpenAI
+  - Anthropic
+  - Google Gemini
+  - Ollama
+  - DeepSeek
+  - Kimi
+- provider-specific API key and/or base URL when needed
+- a model selection for the chosen provider
 - an initial subset of the default pianist allowlist
 
-The allowlist picker is keyboard-driven:
+The onboarding pickers are keyboard-driven:
 
 - `up/down` or `j/k`: move
-- `space`: toggle the current pianist
-- `enter`: confirm the selection
+- `enter`: confirm the current choice
 - `q`: cancel
+
+The pianist allowlist picker also supports:
+
+- `space`: toggle the current pianist
 
 The currently selected row is rendered in bold.
 
@@ -169,7 +180,7 @@ For LLM-backed recommendations, the config supports named profiles:
       },
       "kimi": {
         "provider": "openai_compat",
-        "model": "moonshot-v1-8k",
+        "model": "kimi-k2.5",
         "base_url": "https://api.moonshot.ai/v1",
         "api_key": ""
       }
@@ -181,7 +192,7 @@ For LLM-backed recommendations, the config supports named profiles:
 Minimal manual config steps:
 
 1. set `spotify.client_id` and `spotify.client_secret`
-2. choose an `llm.active_profile`
+2. choose an `llm.active_profile` such as `openai`, `anthropic`, `google`, `ollama`, `deepseek`, or `kimi`
 3. fill in `llm.profiles.<name>.provider`
 4. fill in `llm.profiles.<name>.model`
 5. fill in `llm.profiles.<name>.api_key` when that provider needs one
@@ -367,7 +378,7 @@ LLM_PROFILE=deepseek go run ./cmd/tracker recommend pianists
 LLM_PROFILE=kimi go run ./cmd/tracker recommend pianists
 ```
 
-`LLM_*` env vars override profile settings. Legacy `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL` still work for the OpenAI path during migration.
+`LLM_*` env vars override profile settings. Legacy `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL` still work for the OpenAI path for compatibility.
 
 Notes:
 
@@ -402,15 +413,12 @@ Notes:
 - the recommendation flow is only as good as the ratings and comments already in your local database
 - provider behavior differs: Anthropic and some OpenAI-compatible models may need fallback repair passes, and slower Gemini models can take noticeably longer to respond
 
-## Future Work
-
-- improve the onboarding flow so non-OpenAI LLM profiles can be configured interactively
-
 ## Command Summary
 
 ```text
 tracker config
 tracker list
+tracker onboarding
 tracker rate
 tracker rate-prompt
 tracker recommend

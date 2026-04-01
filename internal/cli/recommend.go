@@ -87,7 +87,7 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 		Use:   "pianists",
 		Short: "Use an LLM plus Spotify validation to recommend new pianists",
 		Example: "  tracker recommend pianists\n" +
-			"  OPENAI_MODEL=gpt-5.4 tracker recommend pianists --limit 5",
+			"  LLM_MODEL=gpt-5.4 tracker recommend pianists --limit 5",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if limit < 1 {
 				return fmt.Errorf("limit must be at least 1, got %d", limit)
@@ -125,7 +125,7 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 				return fmt.Errorf("not enough local rating data for pianist recommendations yet: %w", err)
 			}
 
-			provider, err := providers.NewOpenAIFromConfig(cfg.OpenAI)
+			provider, err := providers.FromConfig(cfg)
 			if err != nil {
 				return err
 			}

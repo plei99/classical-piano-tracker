@@ -126,8 +126,8 @@ func TestRecommendPianistsRequiresOpenAIKeyAfterDataCheck(t *testing.T) {
 	if err == nil {
 		t.Fatal("cmd.Execute() error = nil, want missing OpenAI key failure")
 	}
-	if !strings.Contains(err.Error(), "OpenAI API key is required") {
-		t.Fatalf("error = %q, want missing OpenAI key message", err)
+	if !strings.Contains(err.Error(), "API key is required") {
+		t.Fatalf("error = %q, want missing key message", err)
 	}
 }
 
@@ -142,7 +142,16 @@ func testRecommendationConfig(openAIKey string) *config.Config {
 				Expiry:      time.Now().Add(time.Hour),
 			},
 		},
-		OpenAI:            config.OpenAIConfig{APIKey: openAIKey},
+		LLM: config.LLMConfig{
+			ActiveProfile: "openai",
+			Profiles: map[string]config.LLMProfile{
+				"openai": {
+					Provider: "openai",
+					Model:    "gpt-5.4",
+					APIKey:   openAIKey,
+				},
+			},
+		},
 		PianistsAllowlist: []string{"Martha Argerich"},
 	}
 }

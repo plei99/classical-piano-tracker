@@ -17,7 +17,7 @@ var runPianistSelection = promptPianistSelection
 func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "onboarding",
-		Short: "Interactive first-run setup for Spotify, OpenAI, and pianist filters",
+		Short: "Interactive first-run setup for Spotify, LLM, and pianist filters",
 		Example: "  tracker onboarding\n" +
 			"  tracker --config ~/custom-config.json onboarding",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -45,7 +45,8 @@ func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			openAIKey, err := promptOptionalValue(reader, writer, "OpenAI API key (optional)", cfg.OpenAI.APIKey)
+			defaultLLMKey := cfg.EffectiveLLMConfig().Profiles["openai"].APIKey
+			llmKey, err := promptOptionalValue(reader, writer, "LLM API key for default OpenAI profile (optional)", defaultLLMKey)
 			if err != nil {
 				return err
 			}
@@ -58,7 +59,7 @@ func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 
 			cfg.Spotify.ClientID = clientID
 			cfg.Spotify.ClientSecret = clientSecret
-			cfg.OpenAI.APIKey = openAIKey
+			cfg.SetDefaultLLMAPIKey(llmKey)
 			cfg.PianistsAllowlist = selected
 
 			if err := config.Save(configPath, cfg); err != nil {

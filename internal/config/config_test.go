@@ -39,8 +39,15 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 				Expiry:       time.Date(2026, time.March, 31, 12, 0, 0, 0, time.UTC),
 			},
 		},
-		OpenAI: OpenAIConfig{
-			APIKey: "openai-key",
+		LLM: LLMConfig{
+			ActiveProfile: "openai",
+			Profiles: map[string]LLMProfile{
+				"openai": {
+					Provider: "openai",
+					Model:    "gpt-5.4",
+					APIKey:   "openai-key",
+				},
+			},
 		},
 		PianistsAllowlist: []string{"Martha Argerich", "Daniil Trifonov"},
 		ArtistsBlocklist:  []string{"Yiruma"},
@@ -90,8 +97,15 @@ func TestEnsureCreatesDefaultConfigWhenMissing(t *testing.T) {
 	if cfg.Spotify.ClientID != "" || cfg.Spotify.ClientSecret != "" {
 		t.Fatalf("default config should not contain Spotify credentials: %#v", cfg.Spotify)
 	}
-	if cfg.OpenAI.APIKey != "" {
-		t.Fatalf("default config should not contain an OpenAI API key: %#v", cfg.OpenAI)
+	if cfg.EffectiveLLMConfig().ActiveProfile != "openai" {
+		t.Fatalf("default config active LLM profile = %q, want openai", cfg.EffectiveLLMConfig().ActiveProfile)
+	}
+	profile := cfg.EffectiveLLMConfig().Profiles["openai"]
+	if profile.Provider != "openai" || profile.Model != "gpt-5.4" {
+		t.Fatalf("default config LLM profile = %#v, want openai/gpt-5.4", profile)
+	}
+	if profile.APIKey != "" {
+		t.Fatalf("default config should not contain an LLM API key: %#v", profile)
 	}
 	if len(cfg.PianistsAllowlist) == 0 {
 		t.Fatal("default config should include a populated pianist allowlist")
@@ -222,6 +236,50 @@ func TestValidateRejectsInvalidTokenAndArtists(t *testing.T) {
 		if !strings.Contains(err.Error(), problem) {
 			t.Fatalf("Validate() error = %q, want %q", err, problem)
 		}
+	}
+}
+
+func TestEffectiveLLMConfigSynthesizesLegacyOpenAIConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		OpenAI: OpenAIConfig{APIKey: "legacy-key"},
+	}
+
+	effective := cfg.EffectiveLLMConfig()
+	if effective.ActiveProfile != "openai" {
+		t.Fatalf("ActiveProfile = %q, want openai", effective.ActiveProfile)
+	}
+	profile := effective.Profiles["openai"]
+	if profile.Provider != "openai" {
+		t.Fatalf("profile.Provider = %q, want openai", profile.Provider)
+	}
+	if profile.Model != "gpt-5.4" {
+		t.Fatalf("profile.Model = %q, want gpt-5.4", profile.Model)
+	}
+	if profile.APIKey != "legacy-key" {
+		t.Fatalf("profile.APIKey = %q, want legacy-key", profile.APIKey)
+	}
+}
+
+func TestSetDefaultLLMAPIKeyWritesLLMAndClearsLegacyOpenAI(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		OpenAI: OpenAIConfig{APIKey: "legacy-key"},
+	}
+
+	cfg.SetDefaultLLMAPIKey("new-key")
+
+	profile := cfg.LLM.Profiles["openai"]
+	if cfg.LLM.ActiveProfile != "openai" {
+		t.Fatalf("ActiveProfile = %q, want openai", cfg.LLM.ActiveProfile)
+	}
+	if profile.Provider != "openai" || profile.Model != "gpt-5.4" || profile.APIKey != "new-key" {
+		t.Fatalf("profile = %#v, want default openai profile with new key", profile)
+	}
+	if cfg.OpenAI.APIKey != "" {
+		t.Fatalf("legacy OpenAI key = %q, want cleared", cfg.OpenAI.APIKey)
 	}
 }
 

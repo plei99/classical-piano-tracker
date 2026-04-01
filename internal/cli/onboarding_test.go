@@ -41,8 +41,8 @@ func TestOnboardingCommandWritesSelectedConfig(t *testing.T) {
 	if cfg.Spotify.ClientID != "spotify-client" || cfg.Spotify.ClientSecret != "spotify-secret" {
 		t.Fatalf("unexpected Spotify config: %#v", cfg.Spotify)
 	}
-	if cfg.OpenAI.APIKey != "openai-key" {
-		t.Fatalf("OpenAI.APIKey = %q, want openai-key", cfg.OpenAI.APIKey)
+	if profile := cfg.EffectiveLLMConfig().Profiles["openai"]; profile.APIKey != "openai-key" {
+		t.Fatalf("openai profile APIKey = %q, want openai-key", profile.APIKey)
 	}
 	wantAllowlist := []string{defaultPianists[0], defaultPianists[2]}
 	if len(cfg.PianistsAllowlist) != len(wantAllowlist) {
@@ -89,7 +89,7 @@ func TestOnboardingCommandKeepsFullDefaultAllowlistOnBlankSelection(t *testing.T
 	if len(cfg.PianistsAllowlist) != len(config.DefaultPianistsAllowlist()) {
 		t.Fatalf("PianistsAllowlist len = %d, want full default list", len(cfg.PianistsAllowlist))
 	}
-	if cfg.OpenAI.APIKey != "" {
-		t.Fatalf("OpenAI.APIKey = %q, want blank optional key", cfg.OpenAI.APIKey)
+	if profile := cfg.EffectiveLLMConfig().Profiles["openai"]; profile.APIKey != "" {
+		t.Fatalf("openai profile APIKey = %q, want blank optional key", profile.APIKey)
 	}
 }

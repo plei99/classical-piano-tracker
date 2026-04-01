@@ -19,6 +19,10 @@ const (
 	configName = "config.json"
 	fileMode   = 0o600
 	dirMode    = 0o700
+
+	defaultLLMProfileName = "openai"
+	defaultLLMProvider    = "openai"
+	defaultLLMModel       = "gpt-5.4"
 )
 
 var defaultPianistsAllowlist = []string{
@@ -111,6 +115,7 @@ var defaultPianistsAllowlist = []string{
 // Config stores local application state and curation filters.
 type Config struct {
 	Spotify           SpotifyConfig `json:"spotify"`
+	LLM               LLMConfig     `json:"llm,omitempty"`
 	OpenAI            OpenAIConfig  `json:"openai,omitempty"`
 	PianistsAllowlist []string      `json:"pianists_allowlist"`
 	ArtistsBlocklist  []string      `json:"artists_blocklist"`
@@ -126,6 +131,20 @@ type SpotifyConfig struct {
 // OpenAIConfig stores optional OpenAI settings used for recommendations.
 type OpenAIConfig struct {
 	APIKey string `json:"api_key,omitempty"`
+}
+
+// LLMConfig stores provider-agnostic recommendation settings.
+type LLMConfig struct {
+	ActiveProfile string                `json:"active_profile,omitempty"`
+	Profiles      map[string]LLMProfile `json:"profiles,omitempty"`
+}
+
+// LLMProfile stores the settings for one named LLM provider profile.
+type LLMProfile struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"`
 }
 
 // Token stores the persisted OAuth token state.
@@ -145,19 +164,117 @@ func (e *ValidationError) Error() string {
 	return strings.Join(e.Problems, "; ")
 }
 
+type configJSON struct {
+	Spotify           SpotifyConfig `json:"spotify"`
+	LLM               *LLMConfig    `json:"llm,omitempty"`
+	OpenAI            *OpenAIConfig `json:"openai,omitempty"`
+	PianistsAllowlist []string      `json:"pianists_allowlist"`
+	ArtistsBlocklist  []string      `json:"artists_blocklist"`
+}
+
 // Default returns the first-run config template written when no file exists yet.
 func Default() *Config {
 	return &Config{
 		Spotify:           SpotifyConfig{},
-		OpenAI:            OpenAIConfig{},
+		LLM:               DefaultLLMConfig(),
 		PianistsAllowlist: append([]string(nil), defaultPianistsAllowlist...),
 		ArtistsBlocklist:  []string{},
+	}
+}
+
+// MarshalJSON omits the legacy openai block from newly written configs unless
+// it actually contains a key.
+func (c Config) MarshalJSON() ([]byte, error) {
+	payload := configJSON{
+		Spotify:           c.Spotify,
+		PianistsAllowlist: c.PianistsAllowlist,
+		ArtistsBlocklist:  c.ArtistsBlocklist,
+	}
+	if c.LLM.ActiveProfile != "" || len(c.LLM.Profiles) > 0 {
+		llmConfig := c.LLM.Clone()
+		payload.LLM = &llmConfig
+	}
+	if strings.TrimSpace(c.OpenAI.APIKey) != "" {
+		openAIConfig := c.OpenAI
+		payload.OpenAI = &openAIConfig
+	}
+
+	return json.Marshal(payload)
+}
+
+// DefaultLLMConfig returns the default provider-agnostic LLM config template.
+func DefaultLLMConfig() LLMConfig {
+	return LLMConfig{
+		ActiveProfile: defaultLLMProfileName,
+		Profiles: map[string]LLMProfile{
+			defaultLLMProfileName: {
+				Provider: defaultLLMProvider,
+				Model:    defaultLLMModel,
+			},
+		},
 	}
 }
 
 // DefaultPianistsAllowlist returns a copy of the built-in pianist seed list.
 func DefaultPianistsAllowlist() []string {
 	return append([]string(nil), defaultPianistsAllowlist...)
+}
+
+// EffectiveLLMConfig returns the active provider-agnostic config, synthesizing
+// an OpenAI profile from the legacy openai block when needed.
+func (c *Config) EffectiveLLMConfig() LLMConfig {
+	if c == nil {
+		return DefaultLLMConfig()
+	}
+
+	if len(c.LLM.Profiles) > 0 {
+		return c.LLM.Clone()
+	}
+
+	cfg := DefaultLLMConfig()
+	if strings.TrimSpace(c.OpenAI.APIKey) != "" {
+		profile := cfg.Profiles[defaultLLMProfileName]
+		profile.APIKey = strings.TrimSpace(c.OpenAI.APIKey)
+		cfg.Profiles[defaultLLMProfileName] = profile
+	}
+	return cfg
+}
+
+// SetDefaultLLMAPIKey stores the key on the default OpenAI profile and clears
+// the legacy openai block for newly written configs.
+func (c *Config) SetDefaultLLMAPIKey(apiKey string) {
+	if c == nil {
+		return
+	}
+
+	cfg := c.EffectiveLLMConfig()
+	profile := cfg.Profiles[defaultLLMProfileName]
+	profile.Provider = defaultLLMProvider
+	if strings.TrimSpace(profile.Model) == "" {
+		profile.Model = defaultLLMModel
+	}
+	profile.APIKey = strings.TrimSpace(apiKey)
+	cfg.ActiveProfile = defaultLLMProfileName
+	cfg.Profiles[defaultLLMProfileName] = profile
+
+	c.LLM = cfg
+	c.OpenAI = OpenAIConfig{}
+}
+
+// Clone returns a deep copy of the LLM config.
+func (c LLMConfig) Clone() LLMConfig {
+	cloned := LLMConfig{
+		ActiveProfile: c.ActiveProfile,
+	}
+	if len(c.Profiles) == 0 {
+		return cloned
+	}
+
+	cloned.Profiles = make(map[string]LLMProfile, len(c.Profiles))
+	for name, profile := range c.Profiles {
+		cloned.Profiles[name] = profile
+	}
+	return cloned
 }
 
 // OAuthToken returns the config token as an oauth2 token.
@@ -358,6 +475,7 @@ func (c *Config) Validate() error {
 
 	problems = append(problems, validateArtists("pianists_allowlist", c.PianistsAllowlist)...)
 	problems = append(problems, validateArtists("artists_blocklist", c.ArtistsBlocklist)...)
+	problems = append(problems, c.EffectiveLLMConfig().validate()...)
 
 	if c.Spotify.Token != nil {
 		if strings.TrimSpace(c.Spotify.Token.AccessToken) == "" {
@@ -373,6 +491,43 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+func (c LLMConfig) validate() []string {
+	var problems []string
+
+	if c.ActiveProfile == "" && len(c.Profiles) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(c.ActiveProfile) == "" {
+		problems = append(problems, "llm.active_profile is required when llm.profiles is configured")
+		return problems
+	}
+
+	profile, ok := c.Profiles[c.ActiveProfile]
+	if !ok {
+		problems = append(problems, fmt.Sprintf("llm.active_profile %q was not found in llm.profiles", c.ActiveProfile))
+		return problems
+	}
+
+	if strings.TrimSpace(profile.Provider) == "" {
+		problems = append(problems, fmt.Sprintf("llm.profiles.%s.provider is required", c.ActiveProfile))
+	}
+	if strings.TrimSpace(profile.Model) == "" {
+		problems = append(problems, fmt.Sprintf("llm.profiles.%s.model is required", c.ActiveProfile))
+	}
+
+	for name, profile := range c.Profiles {
+		if strings.TrimSpace(name) == "" {
+			problems = append(problems, "llm.profiles must not contain blank profile names")
+			continue
+		}
+		if strings.TrimSpace(profile.Provider) == "" {
+			problems = append(problems, fmt.Sprintf("llm.profiles.%s.provider is required", name))
+		}
+	}
+
+	return problems
 }
 
 // ValidateClientCredentials checks only the Spotify credentials required to start OAuth.

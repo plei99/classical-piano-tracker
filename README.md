@@ -91,7 +91,7 @@ That interactive flow collects:
 
 - Spotify client ID
 - Spotify client secret
-- optional OpenAI API key
+- optional LLM API key for the default OpenAI profile
 - an initial subset of the default pianist allowlist
 
 The allowlist picker is keyboard-driven:
@@ -253,14 +253,15 @@ This command:
 Required environment variable:
 
 ```bash
-export OPENAI_API_KEY=...
+export LLM_API_KEY=...
 ```
 
 Optional overrides:
 
 ```bash
-export OPENAI_MODEL=gpt-5.4
-export OPENAI_BASE_URL=https://api.openai.com/v1/responses
+export LLM_PROFILE=openai
+export LLM_MODEL=gpt-5.4
+export LLM_BASE_URL=https://api.openai.com/v1/responses
 ```
 
 Run:
@@ -270,7 +271,8 @@ go run ./cmd/tracker recommend pianists
 go run ./cmd/tracker recommend pianists --limit 5
 ```
 
-The default OpenAI model is `gpt-5.4`. `OPENAI_MODEL` overrides it.
+The default OpenAI profile uses `gpt-5.4`. `LLM_*` env vars override profile settings.
+Legacy `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL` still work during migration.
 
 ## Current Limits
 

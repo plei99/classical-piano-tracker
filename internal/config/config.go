@@ -306,6 +306,28 @@ func (c *Config) SetDefaultLLMAPIKey(apiKey string) {
 	c.OpenAI = OpenAIConfig{}
 }
 
+// SetLLMProfile stores one provider-agnostic LLM profile and marks it active.
+func (c *Config) SetLLMProfile(name string, profile LLMProfile) {
+	if c == nil {
+		return
+	}
+
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+
+	cfg := c.EffectiveLLMConfig()
+	if cfg.Profiles == nil {
+		cfg.Profiles = make(map[string]LLMProfile)
+	}
+	cfg.ActiveProfile = name
+	cfg.Profiles[name] = profile
+
+	c.LLM = cfg
+	c.OpenAI = OpenAIConfig{}
+}
+
 // Clone returns a deep copy of the LLM config.
 func (c LLMConfig) Clone() LLMConfig {
 	cloned := LLMConfig{

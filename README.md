@@ -2,6 +2,10 @@
 
 A Go CLI/TUI for tracking, filtering, rating, and exploring your classical piano listening history from Spotify.
 
+## Warning
+
+This project was written for my personal use.
+
 ## Stack
 
 - Go
@@ -19,6 +23,13 @@ A Go CLI/TUI for tracking, filtering, rating, and exploring your classical piano
 - Browse, sync, and rate tracks in a terminal UI
 - Rank your favorite pianists from local ratings and replay counts
 - Generate LLM-backed recommendations for new pianists, then validate them against Spotify
+
+## Requirements
+
+- Go installed locally
+- a Spotify developer application with a client ID and client secret
+- a Spotify account with listening history to sync
+- optionally, an OpenAI API key if you want pianist recommendations from the LLM-backed flow
 
 ## Local State
 
@@ -40,14 +51,28 @@ tracker config path
 tracker --config /custom/config.json --db /custom/tracker.db ...
 ```
 
-## Build
+## Installation
 
 ```bash
 go build ./...
 make build
+make install
 ```
 
-To run without installing:
+By default, `make install` copies the binary to:
+
+```text
+~/.local/bin/tracker
+```
+
+Override that location if you want:
+
+```bash
+make install BINDIR=/opt/homebrew/bin
+make install BINDIR=/usr/local/bin
+```
+
+If you do not want to install it globally, you can still run it from the repo:
 
 ```bash
 go run ./cmd/tracker --help
@@ -68,6 +93,14 @@ That interactive flow collects:
 - Spotify client secret
 - optional OpenAI API key
 - an initial subset of the default pianist allowlist
+
+After onboarding, run:
+
+```bash
+tracker spotify login
+tracker sync
+tracker tui
+```
 
 ### Manual setup
 
@@ -229,6 +262,14 @@ go run ./cmd/tracker recommend pianists --limit 5
 ```
 
 The default OpenAI model is `gpt-5.4`. `OPENAI_MODEL` overrides it.
+
+## Current Limits
+
+- filtering is based only on Spotify artist names plus your allowlist and blocklist
+- classical metadata on streaming services is messy, so some recordings will be misclassified
+- favorite-pianist ranking is deterministic but intentionally simple
+- LLM-backed recommendations suggest pianists, not tracks
+- the recommendation flow is only as good as the ratings and comments already in your local database
 
 ## Command Summary
 

@@ -13,6 +13,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newTUICmd keeps the Bubble Tea model focused on UI state by injecting sync
+// and rating callbacks instead of letting the TUI construct clients itself.
 func newTUICmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "tui",
@@ -51,6 +53,8 @@ func newTUICmd(opts *rootOptions) *cobra.Command {
 	}
 }
 
+// newTUISyncFunc bridges the TUI into the same sync/config/token persistence
+// path used by the CLI command.
 func newTUISyncFunc(configPath string, queries *db.Queries) tui.SyncFunc {
 	return func(ctx context.Context) (syncer.Stats, error) {
 		cfg, created, err := ensureLoadedConfig(configPath)
@@ -76,6 +80,8 @@ func newTUISyncFunc(configPath string, queries *db.Queries) tui.SyncFunc {
 	}
 }
 
+// newTUISaveRatingFunc is intentionally tiny so DB writes stay injected and
+// easy to mock in TUI tests.
 func newTUISaveRatingFunc(queries *db.Queries) tui.SaveRatingFunc {
 	return func(ctx context.Context, arg db.UpsertRatingParams) (db.Rating, error) {
 		return queries.UpsertRating(ctx, arg)

@@ -24,6 +24,8 @@ const (
 	callbackShutdownTimeout = 5 * time.Second
 )
 
+// newAuthenticator centralizes the Spotify OAuth settings so login and
+// authenticated client creation stay aligned on redirect URL and scopes.
 func newAuthenticator(cfg config.SpotifyConfig) (*spotifyauth.Authenticator, error) {
 	if err := cfg.ValidateClientCredentials(); err != nil {
 		return nil, fmt.Errorf("invalid Spotify credentials: %w", err)
@@ -125,6 +127,8 @@ func Login(ctx context.Context, cfg config.SpotifyConfig, presentURL func(string
 	}
 }
 
+// callbackServerConfig validates the redirect URL and extracts the bind address
+// and callback path used by the local one-shot HTTP server.
 func callbackServerConfig(rawURL string) (listenAddr string, callbackPath string, err error) {
 	redirectURL, err := url.Parse(rawURL)
 	if err != nil {
@@ -152,6 +156,7 @@ func callbackServerConfig(rawURL string) (listenAddr string, callbackPath string
 	return host, redirectURL.Path, nil
 }
 
+// randomState generates the anti-CSRF OAuth state token for the current login attempt.
 func randomState() (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
@@ -161,12 +166,16 @@ func randomState() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
+// shutdownCallbackServer keeps callback shutdown bounded so login cancellation
+// does not leave a hanging local server.
 func shutdownCallbackServer(server *http.Server) error {
 	ctx, cancel := context.WithTimeout(context.Background(), callbackShutdownTimeout)
 	defer cancel()
 	return server.Shutdown(ctx)
 }
 
+// sendCallbackError avoids blocking the callback handler if the error channel
+// has already been populated by an earlier failure path.
 func sendCallbackError(errCh chan<- error, err error) {
 	select {
 	case errCh <- err:

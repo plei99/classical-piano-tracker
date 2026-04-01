@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// runPianistSelection is a test seam for swapping out the interactive picker
+// when onboarding command tests need deterministic selection results.
 var runPianistSelection = promptPianistSelection
 
 func newOnboardingCmd(opts *rootOptions) *cobra.Command {
@@ -75,6 +77,8 @@ func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 	}
 }
 
+// promptRequiredValue keeps the line-oriented onboarding prompts small and
+// dependency-free for simple string fields.
 func promptRequiredValue(reader *bufio.Reader, writer io.Writer, label string, current string) (string, error) {
 	for {
 		value, err := promptValue(reader, writer, label, current)
@@ -89,10 +93,13 @@ func promptRequiredValue(reader *bufio.Reader, writer io.Writer, label string, c
 	}
 }
 
+// promptOptionalValue mirrors promptRequiredValue but preserves blank input.
 func promptOptionalValue(reader *bufio.Reader, writer io.Writer, label string, current string) (string, error) {
 	return promptValue(reader, writer, label, current)
 }
 
+// promptValue implements the shared "show current value, allow Enter to keep"
+// behavior used by all non-picker onboarding prompts.
 func promptValue(reader *bufio.Reader, writer io.Writer, label string, current string) (string, error) {
 	if strings.TrimSpace(current) != "" {
 		fmt.Fprintf(writer, "%s [%s]: ", label, current)

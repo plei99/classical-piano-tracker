@@ -158,6 +158,8 @@ func normalizeRecentTrackLimit(limit int) (int, error) {
 	return limit, nil
 }
 
+// normalizeRecentlyPlayed converts Spotify SDK types into the app's smaller
+// normalized shape so downstream packages do not depend on the SDK directly.
 func normalizeRecentlyPlayed(items []spotifyapi.RecentlyPlayedItem) []RecentTrack {
 	tracks := make([]RecentTrack, 0, len(items))
 	for _, item := range items {
@@ -192,6 +194,8 @@ func normalizeRecentlyPlayed(items []spotifyapi.RecentlyPlayedItem) []RecentTrac
 	return tracks
 }
 
+// persistCurrentToken snapshots the SDK's current token after API calls so
+// refreshes are written back only when something actually changed.
 func (c *Client) persistCurrentToken() error {
 	if c.saveToken == nil {
 		return nil
@@ -225,6 +229,8 @@ func tokensEqual(left *oauth2.Token, right *oauth2.Token) bool {
 		left.Expiry.Equal(right.Expiry)
 }
 
+// cloneToken prevents shared mutation between the SDK's token and persisted
+// snapshots kept by the CLI layer.
 func cloneToken(token *oauth2.Token) *oauth2.Token {
 	if token == nil {
 		return nil

@@ -9,6 +9,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// pianistSelectionModel is a deliberately small one-screen Bubble Tea model
+// used only during onboarding. It exists so pianist curation can use real key
+// bindings without pulling the main TUI into the setup flow.
 type pianistSelectionModel struct {
 	pianists []string
 	selected map[int]bool
@@ -18,6 +21,8 @@ type pianistSelectionModel struct {
 	height   int
 }
 
+// newPianistSelectionModel starts with every pianist selected so onboarding
+// keeps the old "accept the full default list" behavior unless the user opts out.
 func newPianistSelectionModel(pianists []string) pianistSelectionModel {
 	selected := make(map[int]bool, len(pianists))
 	for idx := range pianists {
@@ -114,6 +119,8 @@ func (m pianistSelectionModel) View() string {
 	return b.String()
 }
 
+// visiblePianists keeps the cursor centered in the visible window when possible
+// so large seed lists remain usable in smaller terminals.
 func (m pianistSelectionModel) visiblePianists() (pianists []string, offset int, hiddenAbove bool, hiddenBelow bool) {
 	if len(m.pianists) == 0 {
 		return nil, 0, false, false
@@ -151,6 +158,8 @@ func (m pianistSelectionModel) visiblePianists() (pianists []string, offset int,
 	return m.pianists[start:end], start, start > 0, end < len(m.pianists)
 }
 
+// selectedPianists converts the internal toggle map back into a stable,
+// allowlist-ready slice in original display order.
 func (m pianistSelectionModel) selectedPianists() ([]string, error) {
 	if len(m.pianists) == 0 {
 		return nil, fmt.Errorf("selection source must not be empty")
@@ -169,6 +178,8 @@ func (m pianistSelectionModel) selectedPianists() ([]string, error) {
 	return selected, nil
 }
 
+// promptPianistSelection runs the alternate-screen picker with raw terminal
+// input so arrow keys and space toggles work correctly.
 func promptPianistSelection(reader io.Reader, writer io.Writer, pianists []string) ([]string, error) {
 	model := newPianistSelectionModel(pianists)
 

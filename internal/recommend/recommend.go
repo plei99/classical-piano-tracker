@@ -20,6 +20,8 @@ const (
 	maxCommentedTracks     = 8
 )
 
+// PianistProfile is the deterministic per-pianist aggregate used by the local
+// favorites command.
 type PianistProfile struct {
 	Name            string
 	TrackCount      int
@@ -29,6 +31,8 @@ type PianistProfile struct {
 	FavoriteScore   float64
 }
 
+// TasteTrack is the reduced track shape passed into the recommendation layer
+// and eventually summarized for the LLM.
 type TasteTrack struct {
 	TrackID       int64    `json:"track_id"`
 	TrackName     string   `json:"track_name"`
@@ -41,6 +45,8 @@ type TasteTrack struct {
 	MatchedArtist string   `json:"matched_artist,omitempty"`
 }
 
+// FavoritePianist is the JSON-facing version of PianistProfile embedded inside
+// the LLM taste summary.
 type FavoritePianist struct {
 	Name            string  `json:"name"`
 	TrackCount      int     `json:"track_count"`
@@ -50,6 +56,8 @@ type FavoritePianist struct {
 	FavoriteScore   float64 `json:"favorite_score"`
 }
 
+// TasteSummary is the compact corpus snapshot sent to the LLM. It is designed
+// to be stable, explainable, and much smaller than dumping the whole database.
 type TasteSummary struct {
 	TotalTracks       int               `json:"total_tracks"`
 	TotalRatings      int               `json:"total_ratings"`
@@ -62,6 +70,7 @@ type TasteSummary struct {
 	DiscoveryGuidance string            `json:"discovery_guidance"`
 }
 
+// SuggestedPianist is the raw structured output requested from the LLM.
 type SuggestedPianist struct {
 	PianistName string   `json:"pianist_name"`
 	WhyFit      string   `json:"why_fit"`
@@ -69,11 +78,13 @@ type SuggestedPianist struct {
 	Confidence  string   `json:"confidence"`
 }
 
+// DiscoveryResult wraps the model summary plus raw pianist suggestions.
 type DiscoveryResult struct {
 	Summary         string             `json:"summary"`
 	Recommendations []SuggestedPianist `json:"recommendations"`
 }
 
+// ValidatedPianist is a suggestion that survived Spotify catalog validation.
 type ValidatedPianist struct {
 	SuggestedPianist
 	SpotifyName string
@@ -82,6 +93,7 @@ type ValidatedPianist struct {
 	Genres      []string
 }
 
+// CatalogArtist is the minimal artist shape needed from the validation catalog.
 type CatalogArtist struct {
 	Name       string
 	ID         string
@@ -89,10 +101,14 @@ type CatalogArtist struct {
 	Genres     []string
 }
 
+// ArtistSearcher abstracts catalog lookup so recommendation validation is
+// decoupled from the Spotify client implementation.
 type ArtistSearcher interface {
 	SearchArtists(ctx context.Context, query string, limit int) ([]CatalogArtist, error)
 }
 
+// BuildPianistProfiles attributes local tracks and ratings to allowlisted
+// pianists and computes the deterministic favorite score used by the CLI.
 func BuildPianistProfiles(tracks []db.Track, ratings []db.Rating, allowlist []string) ([]PianistProfile, error) {
 	allowset, canonicalNames := allowlistSet(allowlist)
 	ratingByTrackID := make(map[int64]db.Rating, len(ratings))
@@ -158,6 +174,8 @@ func BuildPianistProfiles(tracks []db.Track, ratings []db.Rating, allowlist []st
 	return profiles, nil
 }
 
+// BuildTasteSummary reduces the local DB into a compact explanation of the
+// user's taste for use by the LLM-backed discovery flow.
 func BuildTasteSummary(tracks []db.Track, ratings []db.Rating, allowlist []string) (TasteSummary, error) {
 	profiles, err := BuildPianistProfiles(tracks, ratings, allowlist)
 	if err != nil {
@@ -262,6 +280,8 @@ func BuildTasteSummary(tracks []db.Track, ratings []db.Rating, allowlist []strin
 	}, nil
 }
 
+// ValidateDiscoveryInput enforces a minimum amount of local signal before the
+// app spends network/API budget on LLM recommendations.
 func ValidateDiscoveryInput(summary TasteSummary) error {
 	if summary.TotalRatings < minRatingsForDiscovery {
 		return fmt.Errorf("need at least %d rated tracks before generating pianist recommendations", minRatingsForDiscovery)
@@ -272,6 +292,8 @@ func ValidateDiscoveryInput(summary TasteSummary) error {
 	return nil
 }
 
+// ValidateSuggestedPianists removes duplicates and known pianists, then checks
+// every remaining suggestion against a real catalog search before surfacing it.
 func ValidateSuggestedPianists(ctx context.Context, searcher ArtistSearcher, knownPianists []string, suggestions []SuggestedPianist, limit int) ([]ValidatedPianist, error) {
 	if searcher == nil {
 		return nil, errors.New("artist searcher is required")
@@ -320,6 +342,8 @@ func ValidateSuggestedPianists(ctx context.Context, searcher ArtistSearcher, kno
 	return validated, nil
 }
 
+// ParseDiscoveryResult accepts strict JSON output plus fenced JSON snippets so
+// the app tolerates minor response-wrapper differences from the model.
 func ParseDiscoveryResult(raw string) (DiscoveryResult, error) {
 	cleaned := strings.TrimSpace(raw)
 	cleaned = strings.TrimPrefix(cleaned, "```json")
@@ -354,6 +378,8 @@ func ParseDiscoveryResult(raw string) (DiscoveryResult, error) {
 	return result, nil
 }
 
+// favoriteScore deliberately favors explicit ratings over raw replay volume,
+// with a small penalty for tiny sample sizes.
 func favoriteScore(averageStars float64, ratedTrackCount int, totalPlayCount int64) float64 {
 	ratingScore := averageStars * 20
 	sampleScore := math.Min(float64(ratedTrackCount), 5) * 5
@@ -408,6 +434,8 @@ func compareTasteTracks(left TasteTrack, right TasteTrack) int {
 	}
 }
 
+// filterRatedTracks keeps the summary payload small while still preserving the
+// strongest positive/negative/commented examples for the model.
 func filterRatedTracks(tracks []TasteTrack, keep func(TasteTrack) bool, limit int) []TasteTrack {
 	filtered := make([]TasteTrack, 0, len(tracks))
 	for _, track := range tracks {
@@ -422,6 +450,8 @@ func filterRatedTracks(tracks []TasteTrack, keep func(TasteTrack) bool, limit in
 	return filtered
 }
 
+// matchedAllowlistedArtists keeps attribution limited to the curated pianist
+// list instead of every artist string attached to a classical recording.
 func matchedAllowlistedArtists(artists []string, allowset map[string]struct{}, canonicalNames map[string]string) []string {
 	seen := map[string]struct{}{}
 	matched := make([]string, 0, len(artists))
@@ -448,6 +478,8 @@ func decodeArtists(raw string) ([]string, error) {
 	return artists, nil
 }
 
+// allowlistSet returns both a normalized lookup set and a canonical-name map so
+// later stages can match case-insensitively but still print the configured name.
 func allowlistSet(items []string) (map[string]struct{}, map[string]string) {
 	set := make(map[string]struct{}, len(items))
 	canonical := make(map[string]string, len(items))
@@ -463,6 +495,8 @@ func allowlistSet(items []string) (map[string]struct{}, map[string]string) {
 	return set, canonical
 }
 
+// pickBestArtistMatch prefers exact normalized-name matches before falling back
+// to substring matches from the validation catalog.
 func pickBestArtistMatch(query string, artists []CatalogArtist) (CatalogArtist, bool) {
 	normalizedQuery := normalizeName(query)
 	for _, artist := range artists {

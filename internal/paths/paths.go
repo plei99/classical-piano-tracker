@@ -38,6 +38,8 @@ func getenvLookup(key string) string {
 	return os.Getenv(key)
 }
 
+// dataDirForOS is split out for testability and to keep platform-specific path
+// policy in one place.
 func dataDirForOS(goos string, homeDir string, lookup lookupEnvFunc) string {
 	switch goos {
 	case "darwin":

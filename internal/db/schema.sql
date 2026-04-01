@@ -1,3 +1,7 @@
+-- Schema notes:
+-- 1. tracks are unique by spotify_id so repeated listens stay on one row
+-- 2. artists is stored as JSON text because the app filters/attributes in Go
+-- 3. ratings are one-to-one with tracks and cascade on track deletion
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS tracks (

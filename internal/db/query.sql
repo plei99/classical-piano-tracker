@@ -1,3 +1,5 @@
+-- Sync writes use a single UPSERT so replayed tracks increment play_count
+-- instead of generating duplicate rows.
 -- name: UpsertTrack :one
 INSERT INTO tracks (
     spotify_id,
@@ -44,6 +46,8 @@ FROM tracks
 ORDER BY play_count DESC, last_played_at DESC, id DESC
 LIMIT sqlc.arg(limit);
 
+-- Recommendation and TUI flows need the full local corpus, so these "all"
+-- queries remain explicit instead of overloading the paginated list queries.
 -- name: ListAllTracks :many
 SELECT *
 FROM tracks

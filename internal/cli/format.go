@@ -10,6 +10,8 @@ import (
 	spotifyclient "github.com/plei99/classical-piano-tracker/internal/spotify"
 )
 
+// printRecentSpotifyTracks renders recent-play output in a human-scannable
+// block format instead of the older single-line dump.
 func printRecentSpotifyTracks(out io.Writer, tracks []spotifyclient.RecentTrack) {
 	for idx, track := range tracks {
 		fmt.Fprintf(out, "%d. %s\n", idx+1, track.Name)
@@ -24,6 +26,8 @@ func printRecentSpotifyTracks(out io.Writer, tracks []spotifyclient.RecentTrack)
 	}
 }
 
+// printFavoritePianists renders deterministic pianist scores as a compact
+// aligned table for CLI use.
 func printFavoritePianists(out io.Writer, profiles []recommend.PianistProfile) {
 	writer := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(writer, "#\tPianist\tScore\tAvg Stars\tRated Tracks\tTotal Plays")
@@ -42,6 +46,8 @@ func printFavoritePianists(out io.Writer, profiles []recommend.PianistProfile) {
 	_ = writer.Flush()
 }
 
+// printValidatedPianists renders the validated subset of LLM suggestions after
+// Spotify catalog lookup has attached IDs, genres, and popularity.
 func printValidatedPianists(out io.Writer, summary string, pianists []recommend.ValidatedPianist) {
 	fmt.Fprintf(out, "Summary: %s\n\n", summary)
 	for idx, pianist := range pianists {

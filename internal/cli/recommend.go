@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newRecommendCmd groups the deterministic and LLM-backed recommendation flows
+// under one namespace without mixing their implementation details.
 func newRecommendCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "recommend",
@@ -161,6 +163,8 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 	return cmd
 }
 
+// loadRecommendationConfig keeps recommendation commands aligned on the same
+// config-loading and first-run semantics used elsewhere in the CLI.
 func loadRecommendationConfig(opts *rootOptions) (*config.Config, string, error) {
 	configPath, err := opts.resolveConfigPath()
 	if err != nil {
@@ -174,6 +178,8 @@ func loadRecommendationConfig(opts *rootOptions) (*config.Config, string, error)
 	return cfg, configPath, nil
 }
 
+// loadRecommendationData reads the complete local corpus because recommendation
+// scoring needs the full set of tracks and ratings, not a paginated subset.
 func loadRecommendationData(ctx context.Context, opts *rootOptions) ([]db.Track, []db.Rating, error) {
 	databasePath, err := opts.resolveDBPath()
 	if err != nil {

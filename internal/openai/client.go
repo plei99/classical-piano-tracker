@@ -21,6 +21,8 @@ const (
 	defaultModel   = "gpt-5.4"
 )
 
+// Client is the current OpenAI-specific discovery client. The rest of the app
+// talks in recommendation-domain types so this can be swapped later.
 type Client struct {
 	apiKey     string
 	model      string
@@ -44,10 +46,14 @@ type responseEnvelope struct {
 	Error *apiError `json:"error"`
 }
 
+// FromEnv exists mainly for tests and simple one-off use. Production CLI code
+// prefers FromConfig so the optional stored API key is honored.
 func FromEnv() (*Client, error) {
 	return FromConfig(config.OpenAIConfig{})
 }
 
+// FromConfig resolves credentials and endpoint settings from env overrides
+// first, then falls back to the persisted config.
 func FromConfig(cfg config.OpenAIConfig) (*Client, error) {
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
@@ -70,6 +76,8 @@ func FromConfig(cfg config.OpenAIConfig) (*Client, error) {
 	return NewClient(apiKey, model, baseURL, nil)
 }
 
+// NewClient leaves the transport injectable so request construction and error
+// handling can be tested without hitting the network.
 func NewClient(apiKey string, model string, baseURL string, httpClient *http.Client) (*Client, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("OpenAI API key is required")
@@ -92,6 +100,8 @@ func NewClient(apiKey string, model string, baseURL string, httpClient *http.Cli
 	}, nil
 }
 
+// SuggestNewPianists sends the compact taste summary to the Responses API and
+// parses the structured JSON result back into recommendation-domain types.
 func (c *Client) SuggestNewPianists(ctx context.Context, summary recommend.TasteSummary, limit int) (recommend.DiscoveryResult, error) {
 	if err := recommend.ValidateDiscoveryInput(summary); err != nil {
 		return recommend.DiscoveryResult{}, err
@@ -154,6 +164,8 @@ func (c *Client) SuggestNewPianists(ctx context.Context, summary recommend.Taste
 	return result, nil
 }
 
+// buildDiscoveryRequest owns the prompt contract with the model. Keeping it in
+// one function makes future provider/model swaps easier to audit.
 func buildDiscoveryRequest(model string, summary recommend.TasteSummary, limit int) ([]byte, error) {
 	summaryJSON, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
@@ -216,6 +228,8 @@ func buildDiscoveryRequest(model string, summary recommend.TasteSummary, limit i
 	return data, nil
 }
 
+// extractOutputText is a fallback for cases where the Responses API payload does
+// not populate output_text but still returns text content items.
 func extractOutputText(envelope responseEnvelope) string {
 	var parts []string
 	for _, item := range envelope.Output {

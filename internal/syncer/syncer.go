@@ -114,6 +114,8 @@ func Run(ctx context.Context, cfg *config.Config, source TrackSource, store Trac
 	return stats, nil
 }
 
+// encodeArtists serializes the normalized artist list exactly once at the sync
+// boundary so downstream DB queries can treat it as opaque JSON text.
 func encodeArtists(artists []string) (string, error) {
 	return marshalArtists(artists)
 }
@@ -127,6 +129,8 @@ func marshalArtists(artists []string) (string, error) {
 	return string(data), nil
 }
 
+// stringSet normalizes config artist names into a lookup set shared by the
+// allowlist and blocklist checks.
 func stringSet(items []string) map[string]struct{} {
 	result := make(map[string]struct{}, len(items))
 	for _, item := range items {
@@ -139,6 +143,7 @@ func stringSet(items []string) map[string]struct{} {
 	return result
 }
 
+// normalizeName keeps filtering case-insensitive and resilient to stray spaces.
 func normalizeName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }

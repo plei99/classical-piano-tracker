@@ -15,6 +15,8 @@ var schemaSQL string
 
 // Open opens a SQLite database using the configured pure-Go driver.
 func Open(path string) (*sql.DB, error) {
+	// The CLI can point at arbitrary db paths, so directory creation happens here
+	// instead of being repeated by every command before opening SQLite.
 	if path != "" && path != ":memory:" && !strings.HasPrefix(path, "file:") {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return nil, fmt.Errorf("create sqlite directory for %q: %w", path, err)
@@ -42,7 +44,8 @@ func Open(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-// Init creates the schema objects required by the application.
+// Init creates the schema objects required by the application. The embedded SQL
+// keeps schema bootstrap colocated with the DB package instead of the CLI.
 func Init(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("initialize sqlite schema: %w", err)

@@ -6,11 +6,15 @@ import (
 )
 
 var (
+	// These values are injected by `make build`. The init fallback below keeps
+	// local `go run` and ad hoc builds from reporting completely blank metadata.
 	Version = "dev"
 	Commit  = "unknown"
 	Date    = "unknown"
 )
 
+// init opportunistically fills in VCS metadata from Go's embedded build info
+// when ldflags were not supplied.
 func init() {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {

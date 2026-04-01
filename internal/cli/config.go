@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// rootOptions carries global path overrides down into subcommands without
+// forcing every package to know how config/db defaults are resolved.
 type rootOptions struct {
 	configPath string
 	dbPath     string

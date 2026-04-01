@@ -12,6 +12,9 @@ func newListCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List locally synced tracks and their IDs",
+		Example: "  tracker list recent\n" +
+			"  tracker list top --limit 20\n" +
+			"  tracker list unrated",
 	}
 
 	cmd.AddCommand(
@@ -29,6 +32,8 @@ func newListRecentCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "recent",
 		Short: "List recent local tracks",
+		Example: "  tracker list recent\n" +
+			"  tracker --db ~/tmp/tracker.db list recent --limit 25",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTrackList(cmd.Context(), cmd, opts, limit, func(ctx context.Context, queries *db.Queries, listLimit int64) ([]db.Track, error) {
 				return queries.ListRecentTracks(ctx, listLimit)
@@ -46,6 +51,8 @@ func newListUnratedCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "unrated",
 		Short: "List unrated local tracks",
+		Example: "  tracker list unrated\n" +
+			"  tracker list unrated --limit 15",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTrackList(cmd.Context(), cmd, opts, limit, func(ctx context.Context, queries *db.Queries, listLimit int64) ([]db.Track, error) {
 				return queries.ListUnratedTracks(ctx, listLimit)
@@ -63,6 +70,8 @@ func newListTopCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "top",
 		Short: "List top-played local tracks",
+		Example: "  tracker list top\n" +
+			"  tracker list top --limit 20",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTrackList(cmd.Context(), cmd, opts, limit, func(ctx context.Context, queries *db.Queries, listLimit int64) ([]db.Track, error) {
 				return queries.ListTopPlayedTracks(ctx, listLimit)

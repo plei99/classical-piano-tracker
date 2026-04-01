@@ -25,6 +25,8 @@ func newRateCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rate",
 		Short: "Rate a locally synced track by ID",
+		Example: "  tracker rate --track-id 12 --stars 5 --opinion \"Explosive and clear\"\n" +
+			"  tracker rate --spotify-id 4uLU6hMCjMI75M1A2tKUQC --stars 4",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validateStrictRateInput(trackID, spotifyID, stars); err != nil {
 				return err

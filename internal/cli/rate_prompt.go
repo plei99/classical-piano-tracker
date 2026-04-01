@@ -25,6 +25,8 @@ func newRatePromptCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rate-prompt",
 		Short: "Choose a local track interactively and rate it",
+		Example: "  tracker rate-prompt\n" +
+			"  tracker rate-prompt --unrated",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if limit < 1 {
 				return fmt.Errorf("limit must be at least 1, got %d", limit)

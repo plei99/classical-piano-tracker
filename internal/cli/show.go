@@ -13,7 +13,9 @@ func newShowCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <track-id>",
 		Short: "Show details for a local track",
-		Args:  cobra.ExactArgs(1),
+		Example: "  tracker show 12\n" +
+			"  tracker --db ~/tmp/tracker.db show 7",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			trackID, err := parsePositiveInt64(args[0], "track ID")
 			if err != nil {

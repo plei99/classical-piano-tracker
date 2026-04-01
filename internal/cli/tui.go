@@ -17,6 +17,8 @@ func newTUICmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "tui",
 		Short: "Browse, sync, and rate tracks in a terminal UI",
+		Example: "  tracker tui\n" +
+			"  tracker --db ~/tmp/tracker.db tui",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, err := opts.resolveConfigPath()
 			if err != nil {

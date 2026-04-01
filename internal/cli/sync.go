@@ -17,6 +17,9 @@ func newSyncCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Sync recent Spotify plays into the local SQLite database",
+		Example: "  tracker sync\n" +
+			"  tracker sync --limit 25\n" +
+			"  tracker --config ~/custom-config.json --db ~/custom-tracker.db sync",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, err := opts.resolveConfigPath()
 			if err != nil {

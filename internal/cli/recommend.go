@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/plei99/classical-piano-tracker/internal/config"
 	"github.com/plei99/classical-piano-tracker/internal/db"
@@ -17,6 +16,8 @@ func newRecommendCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "recommend",
 		Short: "Analyze favorites and generate pianist recommendations",
+		Example: "  tracker recommend favorites\n" +
+			"  tracker recommend pianists --limit 5",
 	}
 
 	cmd.AddCommand(
@@ -33,6 +34,8 @@ func newRecommendFavoritesCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "favorites",
 		Short: "Rank favorite pianists from local ratings and replay counts",
+		Example: "  tracker recommend favorites\n" +
+			"  tracker recommend favorites --limit 15",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if limit < 1 {
 				return fmt.Errorf("limit must be at least 1, got %d", limit)
@@ -64,17 +67,7 @@ func newRecommendFavoritesCmd(opts *rootOptions) *cobra.Command {
 				profiles = profiles[:limit]
 			}
 
-			for idx, profile := range profiles {
-				cmd.Printf(
-					"%d. %s | score=%.2f | avg_stars=%.2f | rated_tracks=%d | total_plays=%d\n",
-					idx+1,
-					profile.Name,
-					profile.FavoriteScore,
-					profile.AverageStars,
-					profile.RatedTrackCount,
-					profile.TotalPlayCount,
-				)
-			}
+			printFavoritePianists(cmd.OutOrStdout(), profiles)
 
 			return nil
 		},
@@ -90,6 +83,8 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pianists",
 		Short: "Use an LLM plus Spotify validation to recommend new pianists",
+		Example: "  tracker recommend pianists\n" +
+			"  OPENAI_MODEL=gpt-5.4 tracker recommend pianists --limit 5",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if limit < 1 {
 				return fmt.Errorf("limit must be at least 1, got %d", limit)
@@ -150,22 +145,13 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 				return err
 			}
 
-			cmd.Printf("summary: %s\n", discovery.Summary)
 			if len(validated) == 0 {
-				cmd.Println("no validated pianist recommendations were found")
+				cmd.Printf("Summary: %s\n", discovery.Summary)
+				cmd.Println("No validated pianist recommendations were found.")
 				return nil
 			}
 
-			for idx, pianist := range validated {
-				cmd.Printf("%d. %s | spotify=%s | popularity=%d\n", idx+1, pianist.SpotifyName, pianist.SpotifyID, pianist.Popularity)
-				if len(pianist.SimilarTo) > 0 {
-					cmd.Printf("   bridge: %s\n", strings.Join(pianist.SimilarTo, ", "))
-				}
-				cmd.Printf("   why: %s\n", pianist.WhyFit)
-				if pianist.Confidence != "" {
-					cmd.Printf("   confidence: %s\n", pianist.Confidence)
-				}
-			}
+			printValidatedPianists(cmd.OutOrStdout(), discovery.Summary, validated)
 
 			return nil
 		},

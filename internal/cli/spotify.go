@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/plei99/classical-piano-tracker/internal/config"
 	spotifyclient "github.com/plei99/classical-piano-tracker/internal/spotify"
@@ -13,6 +12,8 @@ func newSpotifyCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "spotify",
 		Short: "Authenticate with Spotify and inspect playback data",
+		Example: "  tracker spotify login\n" +
+			"  tracker spotify recent --limit 10",
 	}
 
 	cmd.AddCommand(
@@ -27,6 +28,8 @@ func newSpotifyLoginCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "login",
 		Short: "Run the Spotify OAuth login flow and save the token",
+		Example: "  tracker spotify login\n" +
+			"  tracker --config ~/custom-config.json spotify login",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, err := opts.resolveConfigPath()
 			if err != nil {
@@ -66,6 +69,8 @@ func newSpotifyRecentCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "recent",
 		Short: "Fetch the current user's recent Spotify plays",
+		Example: "  tracker spotify recent\n" +
+			"  tracker spotify recent --limit 10",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, err := opts.resolveConfigPath()
 			if err != nil {
@@ -98,15 +103,7 @@ func newSpotifyRecentCmd(opts *rootOptions) *cobra.Command {
 				return nil
 			}
 
-			for _, track := range tracks {
-				cmd.Printf(
-					"%s | %s | %s | %s\n",
-					track.PlayedAt.Format("2006-01-02 15:04:05"),
-					track.Name,
-					strings.Join(track.ArtistNames(), ", "),
-					track.AlbumName,
-				)
-			}
+			printRecentSpotifyTracks(cmd.OutOrStdout(), tracks)
 
 			return nil
 		},

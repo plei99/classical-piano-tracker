@@ -15,6 +15,8 @@ func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "onboarding",
 		Short: "Interactive first-run setup for Spotify, OpenAI, and pianist filters",
+		Example: "  tracker onboarding\n" +
+			"  tracker --config ~/custom-config.json onboarding",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, err := opts.resolveConfigPath()
 			if err != nil {

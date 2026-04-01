@@ -44,15 +44,34 @@ tracker --config /custom/config.json --db /custom/tracker.db ...
 
 ```bash
 go build ./...
+make build
 ```
 
 To run without installing:
 
 ```bash
 go run ./cmd/tracker --help
+go run ./cmd/tracker version
 ```
 
 ## First-Time Setup
+
+The quickest path is:
+
+```bash
+go run ./cmd/tracker onboarding
+```
+
+That interactive flow collects:
+
+- Spotify client ID
+- Spotify client secret
+- optional OpenAI API key
+- an initial subset of the default pianist allowlist
+
+### Manual setup
+
+If you prefer to edit the config directly:
 
 ### 1. Generate the config file
 
@@ -223,6 +242,7 @@ tracker show
 tracker spotify
 tracker sync
 tracker tui
+tracker version
 ```
 
 ## Development Notes

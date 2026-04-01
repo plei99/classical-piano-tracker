@@ -5,6 +5,7 @@ A Go CLI/TUI for tracking, filtering, rating, and exploring your classical piano
 ## Warning
 
 This project was written for my personal use.
+Based on the author's testing so far, `gpt-5.4` seems to produce the best recommendation results overall.
 
 ## Stack
 
@@ -131,6 +132,7 @@ Then edit the generated config file and set:
 - `spotify.client_secret`
 
 The default config also includes a populated `pianists_allowlist` and an empty `artists_blocklist`.
+You can do the entire setup manually without using `tracker onboarding`; the command is just a convenience layer over the same config file.
 
 For LLM-backed recommendations, the config supports named profiles:
 
@@ -174,6 +176,22 @@ For LLM-backed recommendations, the config supports named profiles:
     }
   }
 }
+```
+
+Minimal manual config steps:
+
+1. set `spotify.client_id` and `spotify.client_secret`
+2. choose an `llm.active_profile`
+3. fill in `llm.profiles.<name>.provider`
+4. fill in `llm.profiles.<name>.model`
+5. fill in `llm.profiles.<name>.api_key` when that provider needs one
+6. fill in `llm.profiles.<name>.base_url` for Ollama, DeepSeek, or Kimi when you want a non-default endpoint
+7. adjust `pianists_allowlist` and `artists_blocklist` as needed
+
+After saving the file, validate it with:
+
+```bash
+go run ./cmd/tracker config validate
 ```
 
 ### 2. Configure Spotify redirect URI
@@ -304,7 +322,7 @@ Supported providers today:
   - Kimi
   - DeepSeek
 
-The default LLM profile is `openai` using `gpt-5.4`.
+The default LLM profile is `openai` using `gpt-5.4`, and that is currently the author's recommended choice.
 
 Required configuration:
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,46 +10,23 @@ import (
 	"github.com/plei99/classical-piano-tracker/internal/config"
 )
 
-func TestParseSelectionSupportsSinglesRangesAndDeduplication(t *testing.T) {
-	t.Parallel()
-
-	got, err := parseSelection("1, 3-4, 2, 4", 5)
-	if err != nil {
-		t.Fatalf("parseSelection() error = %v", err)
-	}
-
-	want := []int{0, 2, 3, 1}
-	if len(got) != len(want) {
-		t.Fatalf("parseSelection() len = %d, want %d", len(got), len(want))
-	}
-	for idx := range want {
-		if got[idx] != want[idx] {
-			t.Fatalf("parseSelection()[%d] = %d, want %d", idx, got[idx], want[idx])
-		}
-	}
-}
-
-func TestParseSelectionRejectsInvalidRanges(t *testing.T) {
-	t.Parallel()
-
-	if _, err := parseSelection("4-2", 5); err == nil {
-		t.Fatal("parseSelection() error = nil, want error for descending range")
-	}
-	if _, err := parseSelection("7", 5); err == nil {
-		t.Fatal("parseSelection() error = nil, want out-of-bounds error")
-	}
-}
-
 func TestOnboardingCommandWritesSelectedConfig(t *testing.T) {
-	t.Parallel()
-
 	configPath := filepath.Join(t.TempDir(), "config.json")
+
+	defaultPianists := config.DefaultPianistsAllowlist()
+	previous := runPianistSelection
+	runPianistSelection = func(_ io.Reader, _ io.Writer, _ []string) ([]string, error) {
+		return []string{defaultPianists[0], defaultPianists[2]}, nil
+	}
+	defer func() {
+		runPianistSelection = previous
+	}()
 
 	cmd := NewRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetIn(strings.NewReader("spotify-client\nspotify-secret\nopenai-key\n1,3\n"))
+	cmd.SetIn(strings.NewReader("spotify-client\nspotify-secret\nopenai-key\n"))
 	cmd.SetArgs([]string{"--config", configPath, "onboarding"})
 
 	if err := cmd.Execute(); err != nil {
@@ -66,7 +44,6 @@ func TestOnboardingCommandWritesSelectedConfig(t *testing.T) {
 	if cfg.OpenAI.APIKey != "openai-key" {
 		t.Fatalf("OpenAI.APIKey = %q, want openai-key", cfg.OpenAI.APIKey)
 	}
-	defaultPianists := config.DefaultPianistsAllowlist()
 	wantAllowlist := []string{defaultPianists[0], defaultPianists[2]}
 	if len(cfg.PianistsAllowlist) != len(wantAllowlist) {
 		t.Fatalf("PianistsAllowlist len = %d, want %d", len(cfg.PianistsAllowlist), len(wantAllowlist))
@@ -83,15 +60,21 @@ func TestOnboardingCommandWritesSelectedConfig(t *testing.T) {
 }
 
 func TestOnboardingCommandKeepsFullDefaultAllowlistOnBlankSelection(t *testing.T) {
-	t.Parallel()
-
 	configPath := filepath.Join(t.TempDir(), "config.json")
+
+	previous := runPianistSelection
+	runPianistSelection = func(_ io.Reader, _ io.Writer, pianists []string) ([]string, error) {
+		return append([]string(nil), pianists...), nil
+	}
+	defer func() {
+		runPianistSelection = previous
+	}()
 
 	cmd := NewRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetIn(strings.NewReader("spotify-client\nspotify-secret\n\n\n"))
+	cmd.SetIn(strings.NewReader("spotify-client\nspotify-secret\n\n"))
 	cmd.SetArgs([]string{"--config", configPath, "onboarding"})
 
 	if err := cmd.Execute(); err != nil {

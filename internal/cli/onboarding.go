@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/plei99/classical-piano-tracker/internal/config"
 	"github.com/spf13/cobra"
 )
+
+var runPianistSelection = promptPianistSelection
 
 func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
@@ -28,7 +29,8 @@ func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 				return err
 			}
 
-			reader := bufio.NewReader(cmd.InOrStdin())
+			input := cmd.InOrStdin()
+			reader := bufio.NewReader(input)
 			writer := cmd.OutOrStdout()
 
 			cmd.Printf("Config path: %s\n\n", configPath)
@@ -47,7 +49,7 @@ func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 			}
 
 			defaultPianists := config.DefaultPianistsAllowlist()
-			selected, err := promptPianistSelection(reader, writer, defaultPianists)
+			selected, err := runPianistSelection(input, writer, defaultPianists)
 			if err != nil {
 				return err
 			}
@@ -108,104 +110,4 @@ func promptValue(reader *bufio.Reader, writer io.Writer, label string, current s
 		return current, nil
 	}
 	return trimmed, nil
-}
-
-func promptPianistSelection(reader *bufio.Reader, writer io.Writer, pianists []string) ([]string, error) {
-	fmt.Fprintln(writer, "Select pianists for the initial allowlist.")
-	fmt.Fprintln(writer, "Press Enter to keep the full default list, or enter comma-separated numbers and ranges like 1,2,5-8.")
-	fmt.Fprintln(writer)
-
-	for idx, pianist := range pianists {
-		fmt.Fprintf(writer, "%2d. %s\n", idx+1, pianist)
-	}
-	fmt.Fprintln(writer)
-	fmt.Fprint(writer, "Selection [all]: ")
-
-	line, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("read pianist selection: %w", err)
-	}
-
-	selection := strings.TrimSpace(line)
-	if selection == "" {
-		return append([]string(nil), pianists...), nil
-	}
-
-	indexes, err := parseSelection(selection, len(pianists))
-	if err != nil {
-		return nil, err
-	}
-
-	selected := make([]string, 0, len(indexes))
-	for _, idx := range indexes {
-		selected = append(selected, pianists[idx])
-	}
-
-	return selected, nil
-}
-
-func parseSelection(selection string, max int) ([]int, error) {
-	if max < 1 {
-		return nil, fmt.Errorf("selection source must not be empty")
-	}
-
-	seen := map[int]struct{}{}
-	indexes := make([]int, 0, max)
-
-	for _, part := range strings.Split(selection, ",") {
-		item := strings.TrimSpace(part)
-		if item == "" {
-			continue
-		}
-
-		if strings.Contains(item, "-") {
-			bounds := strings.SplitN(item, "-", 2)
-			if len(bounds) != 2 {
-				return nil, fmt.Errorf("invalid range %q", item)
-			}
-
-			start, err := strconv.Atoi(strings.TrimSpace(bounds[0]))
-			if err != nil {
-				return nil, fmt.Errorf("invalid range start %q", item)
-			}
-			end, err := strconv.Atoi(strings.TrimSpace(bounds[1]))
-			if err != nil {
-				return nil, fmt.Errorf("invalid range end %q", item)
-			}
-			if start < 1 || end < 1 || start > max || end > max || start > end {
-				return nil, fmt.Errorf("range %q is out of bounds", item)
-			}
-
-			for value := start; value <= end; value++ {
-				idx := value - 1
-				if _, exists := seen[idx]; exists {
-					continue
-				}
-				seen[idx] = struct{}{}
-				indexes = append(indexes, idx)
-			}
-			continue
-		}
-
-		value, err := strconv.Atoi(item)
-		if err != nil {
-			return nil, fmt.Errorf("invalid selection %q", item)
-		}
-		if value < 1 || value > max {
-			return nil, fmt.Errorf("selection %q is out of bounds", item)
-		}
-
-		idx := value - 1
-		if _, exists := seen[idx]; exists {
-			continue
-		}
-		seen[idx] = struct{}{}
-		indexes = append(indexes, idx)
-	}
-
-	if len(indexes) == 0 {
-		return nil, fmt.Errorf("selection must include at least one pianist")
-	}
-
-	return indexes, nil
 }

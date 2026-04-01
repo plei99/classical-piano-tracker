@@ -94,6 +94,15 @@ That interactive flow collects:
 - optional OpenAI API key
 - an initial subset of the default pianist allowlist
 
+The allowlist picker is keyboard-driven:
+
+- `up/down` or `j/k`: move
+- `space`: toggle the current pianist
+- `enter`: confirm the selection
+- `q`: cancel
+
+The currently selected row is rendered in bold.
+
 After onboarding, run:
 
 ```bash

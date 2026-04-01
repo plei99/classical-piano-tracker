@@ -28,36 +28,30 @@ var (
 			Padding(1)
 
 	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("230"))
+			Bold(true)
 
 	mutedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245"))
+			Faint(true)
 
 	highlightStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("229"))
+			Bold(true)
 
 	selectedRowStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("24")).
-				Foreground(lipgloss.Color("230")).
+				Reverse(true).
 				Padding(0, 1)
 
 	listPaneStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
 			Padding(1)
 
 	detailPaneStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
 			Padding(1)
 
 	statusBarStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244"))
+			Faint(true)
 
 	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("203")).
 			Bold(true)
 )
 

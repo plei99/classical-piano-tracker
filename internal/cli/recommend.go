@@ -6,7 +6,8 @@ import (
 
 	"github.com/plei99/classical-piano-tracker/internal/config"
 	"github.com/plei99/classical-piano-tracker/internal/db"
-	"github.com/plei99/classical-piano-tracker/internal/openai"
+	"github.com/plei99/classical-piano-tracker/internal/llm"
+	"github.com/plei99/classical-piano-tracker/internal/llm/providers"
 	"github.com/plei99/classical-piano-tracker/internal/recommend"
 	spotifyclient "github.com/plei99/classical-piano-tracker/internal/spotify"
 	"github.com/spf13/cobra"
@@ -124,7 +125,12 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 				return fmt.Errorf("not enough local rating data for pianist recommendations yet: %w", err)
 			}
 
-			llmClient, err := openai.FromConfig(cfg.OpenAI)
+			provider, err := providers.NewOpenAIFromConfig(cfg.OpenAI)
+			if err != nil {
+				return err
+			}
+
+			llmClient, err := llm.NewClient(provider)
 			if err != nil {
 				return err
 			}

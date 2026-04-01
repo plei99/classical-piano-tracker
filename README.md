@@ -313,4 +313,5 @@ tracker version
 - `internal/db/`: schema, queries, and generated DB code
 - `internal/spotify/`: Spotify auth and client integration
 - `internal/recommend/`: favorite-pianist and taste-summary logic
-- `internal/openai/`: OpenAI recommendation client
+- `internal/llm/`: provider-agnostic recommendation layer
+- `internal/openai/`: legacy OpenAI recommendation client kept during migration

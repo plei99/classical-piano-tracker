@@ -132,6 +132,50 @@ Then edit the generated config file and set:
 
 The default config also includes a populated `pianists_allowlist` and an empty `artists_blocklist`.
 
+For LLM-backed recommendations, the config supports named profiles:
+
+```json
+{
+  "llm": {
+    "active_profile": "openai",
+    "profiles": {
+      "openai": {
+        "provider": "openai",
+        "model": "gpt-5.4",
+        "api_key": ""
+      },
+      "anthropic": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "api_key": ""
+      },
+      "google": {
+        "provider": "google",
+        "model": "gemini-3.1-pro-preview",
+        "api_key": ""
+      },
+      "ollama": {
+        "provider": "openai_compat",
+        "model": "qwen2.5:latest",
+        "base_url": "http://localhost:11434/v1"
+      },
+      "deepseek": {
+        "provider": "openai_compat",
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": ""
+      },
+      "kimi": {
+        "provider": "openai_compat",
+        "model": "moonshot-v1-8k",
+        "base_url": "https://api.moonshot.ai/v1",
+        "api_key": ""
+      }
+    }
+  }
+}
+```
+
 ### 2. Configure Spotify redirect URI
 
 In your Spotify developer app settings, add this redirect URI:
@@ -266,6 +310,7 @@ Required configuration:
 
 - either store an API key in `llm.profiles.<name>.api_key`
 - or export a generic/provider-specific API key environment variable
+- for Ollama, you usually do not need an API key
 
 Generic overrides:
 
@@ -312,6 +357,24 @@ Notes:
 - Anthropic and OpenAI-compatible backends may take one or more repair passes before the app gets a fully parseable recommendation list
 - slower Gemini models may need noticeably longer response times than OpenAI
 
+### Troubleshooting
+
+- `json: unknown field ...` while loading config:
+  your config likely uses the wrong field names or shape; check `llm.active_profile` and `llm.profiles.<name>.*`
+- `API key is required`:
+  either store the key in the active profile or export the matching env var such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`, or `KIMI_API_KEY`
+- `base URL` or connection failures with Ollama / DeepSeek / Kimi:
+  verify `llm.profiles.<name>.base_url`
+  Ollama should normally use `http://localhost:11434/v1`
+  DeepSeek should normally use `https://api.deepseek.com/v1`
+  Kimi should normally use `https://api.moonshot.ai/v1`
+- malformed or partial recommendation output:
+  the app already retries and repairs provider output, but weaker local or OpenAI-compatible models may still produce poor results
+  if this happens repeatedly, try a stronger model or switch providers
+- Gemini timeout or slow response:
+  larger Gemini models can take noticeably longer than OpenAI or Anthropic
+  if a model is consistently too slow, try a faster Gemini model or a different provider
+
 ## Current Limits
 
 - filtering is based only on Spotify artist names plus your allowlist and blocklist
@@ -323,7 +386,7 @@ Notes:
 
 ## Future Work
 
-- document example multi-provider config profiles directly in the README
+- improve the onboarding flow so non-OpenAI LLM profiles can be configured interactively
 
 ## Command Summary
 
@@ -355,4 +418,3 @@ tracker version
 - `internal/spotify/`: Spotify auth and client integration
 - `internal/recommend/`: favorite-pianist and taste-summary logic
 - `internal/llm/`: provider-agnostic recommendation layer
-- `internal/openai/`: legacy OpenAI recommendation client kept during migration

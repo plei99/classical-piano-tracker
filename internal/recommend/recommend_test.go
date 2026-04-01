@@ -104,6 +104,70 @@ func TestParseDiscoveryResultHandlesFencedJSON(t *testing.T) {
 	}
 }
 
+func TestParseDiscoveryResultAcceptsPianistsAlias(t *testing.T) {
+	t.Parallel()
+
+	raw := `{"summary":"lyrical","pianists":[{"name":"Radu Lupu","reason":"poetic touch","similar":["Martha Argerich"],"confidence":"medium"}]}`
+	result, err := ParseDiscoveryResult(raw)
+	if err != nil {
+		t.Fatalf("ParseDiscoveryResult() error = %v", err)
+	}
+	if len(result.Recommendations) != 1 {
+		t.Fatalf("Recommendations len = %d, want 1", len(result.Recommendations))
+	}
+	if result.Recommendations[0].PianistName != "Radu Lupu" {
+		t.Fatalf("PianistName = %q, want Radu Lupu", result.Recommendations[0].PianistName)
+	}
+	if result.Recommendations[0].WhyFit != "poetic touch" {
+		t.Fatalf("WhyFit = %q, want poetic touch", result.Recommendations[0].WhyFit)
+	}
+}
+
+func TestParseDiscoveryResultAcceptsNestedResultAlias(t *testing.T) {
+	t.Parallel()
+
+	raw := `{"result":{"overview":"lyrical","suggestions":[{"pianist":"Radu Lupu","why":"poetic touch","similar_to":["Martha Argerich"],"confidence":"medium"}]}}`
+	result, err := ParseDiscoveryResult(raw)
+	if err != nil {
+		t.Fatalf("ParseDiscoveryResult() error = %v", err)
+	}
+	if result.Summary != "lyrical" {
+		t.Fatalf("Summary = %q, want lyrical", result.Summary)
+	}
+	if len(result.Recommendations) != 1 || result.Recommendations[0].PianistName != "Radu Lupu" {
+		t.Fatalf("unexpected recommendations: %+v", result.Recommendations)
+	}
+}
+
+func TestParseDiscoveryRecommendationsAcceptsRecommendationsOnlyPayload(t *testing.T) {
+	t.Parallel()
+
+	raw := `{"recommendations":[{"pianist_name":"Radu Lupu","why_fit":"poetic touch","similar_to":["Martha Argerich"],"confidence":"medium"}]}`
+	recommendations, err := ParseDiscoveryRecommendations(raw)
+	if err != nil {
+		t.Fatalf("ParseDiscoveryRecommendations() error = %v", err)
+	}
+	if len(recommendations) != 1 || recommendations[0].PianistName != "Radu Lupu" {
+		t.Fatalf("unexpected recommendations: %+v", recommendations)
+	}
+}
+
+func TestParsePlaintextRecommendationsParsesRigidFallbackFormat(t *testing.T) {
+	t.Parallel()
+
+	raw := "Radu Lupu || poetic touch || Martha Argerich, Daniil Trifonov || medium\nMarc-André Hamelin || virtuosity with brains || Yuja Wang || high"
+	recommendations, err := ParsePlaintextRecommendations(raw)
+	if err != nil {
+		t.Fatalf("ParsePlaintextRecommendations() error = %v", err)
+	}
+	if len(recommendations) != 2 {
+		t.Fatalf("len(recommendations) = %d, want 2", len(recommendations))
+	}
+	if recommendations[0].PianistName != "Radu Lupu" || recommendations[1].PianistName != "Marc-André Hamelin" {
+		t.Fatalf("unexpected recommendations: %+v", recommendations)
+	}
+}
+
 func TestValidateSuggestedPianistsFiltersKnownNamesAndRequiresCatalogMatch(t *testing.T) {
 	t.Parallel()
 

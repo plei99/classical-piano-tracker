@@ -29,7 +29,7 @@ This project was written for my personal use.
 - Go installed locally
 - a Spotify developer application with a client ID and client secret
 - a Spotify account with listening history to sync
-- optionally, an OpenAI API key if you want pianist recommendations from the LLM-backed flow
+- optionally, an API key for one supported LLM provider if you want pianist recommendations from the LLM-backed flow
 
 ## Local State
 
@@ -247,21 +247,37 @@ It ranks allowlisted pianists using:
 This command:
 
 1. builds a taste summary from local ratings and comments
-2. asks an OpenAI model for new pianist names only
+2. asks the active LLM profile for new pianist names only
 3. validates those names against Spotify artist search
 
-Required environment variable:
+Supported providers today:
+
+- OpenAI
+- Anthropic
+- Google Gemini
+
+The default LLM profile is `openai` using `gpt-5.4`.
+
+Required configuration:
+
+- either store an API key in `llm.profiles.<name>.api_key`
+- or export a generic/provider-specific API key environment variable
+
+Generic overrides:
 
 ```bash
 export LLM_API_KEY=...
-```
-
-Optional overrides:
-
-```bash
 export LLM_PROFILE=openai
 export LLM_MODEL=gpt-5.4
 export LLM_BASE_URL=https://api.openai.com/v1/responses
+```
+
+Provider-specific API key fallbacks:
+
+```bash
+export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
+export GOOGLE_API_KEY=...
 ```
 
 Run:
@@ -271,8 +287,15 @@ go run ./cmd/tracker recommend pianists
 go run ./cmd/tracker recommend pianists --limit 5
 ```
 
-The default OpenAI profile uses `gpt-5.4`. `LLM_*` env vars override profile settings.
-Legacy `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL` still work during migration.
+Examples:
+
+```bash
+LLM_PROFILE=openai go run ./cmd/tracker recommend pianists
+LLM_PROFILE=anthropic go run ./cmd/tracker recommend pianists
+LLM_PROFILE=google LLM_MODEL=gemini-3.1-pro-preview go run ./cmd/tracker recommend pianists
+```
+
+`LLM_*` env vars override profile settings. Legacy `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL` still work for the OpenAI path during migration.
 
 ## Current Limits
 
@@ -281,10 +304,11 @@ Legacy `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL` still work during
 - favorite-pianist ranking is deterministic but intentionally simple
 - LLM-backed recommendations suggest pianists, not tracks
 - the recommendation flow is only as good as the ratings and comments already in your local database
+- provider behavior differs: Anthropic may need fallback repair passes, and slower Gemini models can take noticeably longer to respond
 
 ## Future Work
 
-- make the LLM-backed recommendation layer model-agnostic so it can use providers beyond the current OpenAI-specific integration
+- add OpenAI-compatible provider support for Ollama, Kimi, and DeepSeek
 
 ## Command Summary
 

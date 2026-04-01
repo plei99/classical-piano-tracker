@@ -135,7 +135,7 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 				return err
 			}
 
-			discovery, err := llmClient.SuggestNewPianists(cmd.Context(), summary, limit)
+			discovery, err := llmClient.SuggestNewPianists(cmd.Context(), summary, discoveryRequestLimit(limit))
 			if err != nil {
 				return err
 			}
@@ -148,9 +148,12 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 				return err
 			}
 
-			validated, err := recommend.ValidateSuggestedPianists(cmd.Context(), spotifyAPI, summary.KnownPianists, discovery.Recommendations, 5)
+			validated, err := recommend.ValidateSuggestedPianists(cmd.Context(), spotifyAPI, summary.KnownPianists, discovery.Recommendations, discoverySearchLimit(limit))
 			if err != nil {
 				return err
+			}
+			if len(validated) > limit {
+				validated = validated[:limit]
 			}
 
 			if len(validated) == 0 {
@@ -209,4 +212,24 @@ func loadRecommendationData(ctx context.Context, opts *rootOptions) ([]db.Track,
 	}
 
 	return tracks, ratings, nil
+}
+
+func discoveryRequestLimit(limit int) int {
+	if limit < 1 {
+		return 10
+	}
+	if limit < 5 {
+		return 10
+	}
+	if limit < 10 {
+		return limit * 2
+	}
+	return limit * 2
+}
+
+func discoverySearchLimit(limit int) int {
+	if limit < 5 {
+		return 5
+	}
+	return limit
 }

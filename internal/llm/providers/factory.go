@@ -19,6 +19,10 @@ func FromConfig(cfg *config.Config) (llm.Provider, error) {
 	switch strings.ToLower(strings.TrimSpace(profile.Provider)) {
 	case "openai":
 		return NewOpenAI(profile.APIKey, profile.Model, profile.BaseURL, nil)
+	case "anthropic":
+		return NewAnthropic(profile.APIKey, profile.Model, profile.BaseURL, nil)
+	case "google":
+		return NewGoogle(profile.APIKey, profile.Model, profile.BaseURL, nil)
 	default:
 		return nil, fmt.Errorf("LLM provider %q for profile %q is not implemented yet", profile.Provider, profileName)
 	}

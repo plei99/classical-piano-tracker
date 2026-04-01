@@ -189,6 +189,95 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsHyphenatedLLMProfileAliases(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	body := `{
+  "spotify": {
+    "client_id": "client-id",
+    "client_secret": "client-secret"
+  },
+  "llm": {
+    "active_profile": "anthropic",
+    "profiles": {
+      "anthropic": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-5",
+        "api-key": "test-key",
+        "base-url": "https://api.anthropic.com/v1/messages"
+      }
+    }
+  },
+  "pianists_allowlist": ["Martha Argerich"],
+  "artists_blocklist": []
+}`
+
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	profile := cfg.EffectiveLLMConfig().Profiles["anthropic"]
+	if profile.APIKey != "test-key" {
+		t.Fatalf("profile.APIKey = %q, want test-key", profile.APIKey)
+	}
+	if profile.BaseURL != "https://api.anthropic.com/v1/messages" {
+		t.Fatalf("profile.BaseURL = %q, want Anthropic endpoint", profile.BaseURL)
+	}
+}
+
+func TestSaveRewritesLLMProfileAliasesToCanonicalNames(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{
+		Spotify: SpotifyConfig{
+			ClientID:     "client-id",
+			ClientSecret: "client-secret",
+		},
+		LLM: LLMConfig{
+			ActiveProfile: "google",
+			Profiles: map[string]LLMProfile{
+				"google": {
+					Provider: "google",
+					Model:    "gemini-2.5-pro",
+					APIKey:   "test-key",
+					BaseURL:  "https://generativelanguage.googleapis.com/v1beta/models",
+				},
+			},
+		},
+		PianistsAllowlist: []string{"Martha Argerich"},
+		ArtistsBlocklist:  []string{},
+	}
+
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	if strings.Contains(string(data), `"api-key"`) {
+		t.Fatalf("saved config contains hyphenated api-key alias: %s", data)
+	}
+	if strings.Contains(string(data), `"base-url"`) {
+		t.Fatalf("saved config contains hyphenated base-url alias: %s", data)
+	}
+	if !strings.Contains(string(data), `"api_key"`) {
+		t.Fatalf("saved config missing canonical api_key field: %s", data)
+	}
+	if !strings.Contains(string(data), `"base_url"`) {
+		t.Fatalf("saved config missing canonical base_url field: %s", data)
+	}
+}
+
 func TestValidateRejectsMissingRequiredFields(t *testing.T) {
 	t.Parallel()
 

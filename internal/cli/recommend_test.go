@@ -131,6 +131,26 @@ func TestRecommendPianistsRequiresOpenAIKeyAfterDataCheck(t *testing.T) {
 	}
 }
 
+func TestDiscoveryRequestLimitOverRequestsForValidationHeadroom(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		limit int
+		want  int
+	}{
+		{limit: 1, want: 10},
+		{limit: 5, want: 10},
+		{limit: 7, want: 14},
+		{limit: 10, want: 20},
+	}
+
+	for _, tc := range cases {
+		if got := discoveryRequestLimit(tc.limit); got != tc.want {
+			t.Fatalf("discoveryRequestLimit(%d) = %d, want %d", tc.limit, got, tc.want)
+		}
+	}
+}
+
 func testRecommendationConfig(openAIKey string) *config.Config {
 	return &config.Config{
 		Spotify: config.SpotifyConfig{

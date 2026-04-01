@@ -65,15 +65,67 @@ func TestFromConfigFallsBackToLegacyOpenAIBlock(t *testing.T) {
 	}
 }
 
-func TestFromConfigRejectsUnsupportedProvider(t *testing.T) {
+func TestFromConfigSupportsAnthropicProfile(t *testing.T) {
 	provider, err := FromConfig(&config.Config{
 		LLM: config.LLMConfig{
 			ActiveProfile: "anthropic",
 			Profiles: map[string]config.LLMProfile{
 				"anthropic": {
 					Provider: "anthropic",
-					Model:    "claude",
+					Model:    "claude-sonnet-4-5",
 					APIKey:   "key",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("FromConfig() error = %v", err)
+	}
+
+	anthropic, ok := provider.(*anthropicProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *anthropicProvider", provider)
+	}
+	if anthropic.model != "claude-sonnet-4-5" {
+		t.Fatalf("model = %q, want claude-sonnet-4-5", anthropic.model)
+	}
+}
+
+func TestFromConfigSupportsGoogleProfile(t *testing.T) {
+	provider, err := FromConfig(&config.Config{
+		LLM: config.LLMConfig{
+			ActiveProfile: "google",
+			Profiles: map[string]config.LLMProfile{
+				"google": {
+					Provider: "google",
+					Model:    "gemini-2.5-pro",
+					APIKey:   "key",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("FromConfig() error = %v", err)
+	}
+
+	google, ok := provider.(*googleProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *googleProvider", provider)
+	}
+	if google.model != "gemini-2.5-pro" {
+		t.Fatalf("model = %q, want gemini-2.5-pro", google.model)
+	}
+}
+
+func TestFromConfigRejectsStillUnsupportedProvider(t *testing.T) {
+	provider, err := FromConfig(&config.Config{
+		LLM: config.LLMConfig{
+			ActiveProfile: "ollama",
+			Profiles: map[string]config.LLMProfile{
+				"ollama": {
+					Provider: "openai_compat",
+					Model:    "qwen2.5:latest",
+					BaseURL:  "http://localhost:11434/v1",
 				},
 			},
 		},

@@ -147,6 +147,51 @@ type LLMProfile struct {
 	BaseURL  string `json:"base_url,omitempty"`
 }
 
+// UnmarshalJSON accepts both the canonical underscore names and a small set of
+// hyphenated aliases that can show up in hand-edited configs.
+func (c *OpenAIConfig) UnmarshalJSON(data []byte) error {
+	type profileJSON struct {
+		APIKey    string `json:"api_key"`
+		APIKeyAlt string `json:"api-key"`
+	}
+
+	var raw profileJSON
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&raw); err != nil {
+		return err
+	}
+
+	c.APIKey = strings.TrimSpace(firstNonEmpty(raw.APIKey, raw.APIKeyAlt))
+	return nil
+}
+
+// UnmarshalJSON keeps the written schema stable while tolerating common manual
+// edits like api-key/base-url in existing config files.
+func (p *LLMProfile) UnmarshalJSON(data []byte) error {
+	type profileJSON struct {
+		Provider   string `json:"provider"`
+		Model      string `json:"model"`
+		APIKey     string `json:"api_key"`
+		APIKeyAlt  string `json:"api-key"`
+		BaseURL    string `json:"base_url"`
+		BaseURLAlt string `json:"base-url"`
+	}
+
+	var raw profileJSON
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&raw); err != nil {
+		return err
+	}
+
+	p.Provider = strings.TrimSpace(raw.Provider)
+	p.Model = strings.TrimSpace(raw.Model)
+	p.APIKey = strings.TrimSpace(firstNonEmpty(raw.APIKey, raw.APIKeyAlt))
+	p.BaseURL = strings.TrimSpace(firstNonEmpty(raw.BaseURL, raw.BaseURLAlt))
+	return nil
+}
+
 // Token stores the persisted OAuth token state.
 type Token struct {
 	AccessToken  string    `json:"access_token"`
@@ -582,6 +627,15 @@ func validateArtists(field string, artists []string) []string {
 	}
 
 	return problems
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // AddArtist appends an artist name if it is not already present in the list.

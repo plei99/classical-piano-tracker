@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/plei99/classical-piano-tracker/internal/recommend"
 )
+
+const maxDiscoveryRepairAttempts = 3
 
 // Client wraps a single provider and exposes the app's recommendation task API.
 type Client struct {
@@ -43,6 +46,49 @@ func (c *Client) SuggestNewPianists(ctx context.Context, summary recommend.Taste
 	}
 
 	result, err := recommend.ParseDiscoveryResult(raw)
+	for attempt := 0; err != nil && shouldRepairDiscoveryResponse(err) && attempt < maxDiscoveryRepairAttempts; attempt++ {
+		repairedRaw, repairErr := c.provider.Generate(ctx, buildDiscoveryRepairRequest(raw, limit, attempt+1))
+		if repairErr != nil {
+			break
+		}
+		raw = repairedRaw
+		result, err = recommend.ParseDiscoveryResult(raw)
+	}
+	if err != nil && strings.Contains(err.Error(), "omitted recommendations") {
+		partial, partialErr := recommend.ParseDiscoveryPartial(raw)
+		if partialErr == nil && strings.TrimSpace(partial.Summary) != "" {
+			supplementReq, buildErr := buildDiscoveryRecommendationsOnlyRequest(summary, limit)
+			if buildErr == nil {
+				supplementRaw, supplementErr := c.provider.Generate(ctx, supplementReq)
+				if supplementErr == nil {
+					recommendations, parseSupplementErr := recommend.ParseDiscoveryRecommendations(supplementRaw)
+					if parseSupplementErr == nil {
+						result = recommend.DiscoveryResult{
+							Summary:         partial.Summary,
+							Recommendations: recommendations,
+						}
+						err = nil
+					}
+				}
+			}
+			if err != nil {
+				plainReq, buildPlainErr := buildDiscoveryPlaintextRecommendationsRequest(summary, limit)
+				if buildPlainErr == nil {
+					plainRaw, plainErr := c.provider.Generate(ctx, plainReq)
+					if plainErr == nil {
+						recommendations, parsePlainErr := recommend.ParsePlaintextRecommendations(plainRaw)
+						if parsePlainErr == nil {
+							result = recommend.DiscoveryResult{
+								Summary:         partial.Summary,
+								Recommendations: recommendations,
+							}
+							err = nil
+						}
+					}
+				}
+			}
+		}
+	}
 	if err != nil {
 		return recommend.DiscoveryResult{}, fmt.Errorf("parse LLM discovery response: %w", err)
 	}
@@ -51,4 +97,15 @@ func (c *Client) SuggestNewPianists(ctx context.Context, summary recommend.Taste
 	}
 
 	return result, nil
+}
+
+func shouldRepairDiscoveryResponse(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "omitted summary") ||
+		strings.Contains(message, "omitted recommendations") ||
+		strings.Contains(message, "omitted pianist_name") ||
+		strings.Contains(message, "omitted why_fit")
 }

@@ -255,6 +255,10 @@ Supported providers today:
 - OpenAI
 - Anthropic
 - Google Gemini
+- OpenAI-compatible backends:
+  - Ollama
+  - Kimi
+  - DeepSeek
 
 The default LLM profile is `openai` using `gpt-5.4`.
 
@@ -278,6 +282,8 @@ Provider-specific API key fallbacks:
 export OPENAI_API_KEY=...
 export ANTHROPIC_API_KEY=...
 export GOOGLE_API_KEY=...
+export DEEPSEEK_API_KEY=...
+export KIMI_API_KEY=...
 ```
 
 Run:
@@ -293,9 +299,18 @@ Examples:
 LLM_PROFILE=openai go run ./cmd/tracker recommend pianists
 LLM_PROFILE=anthropic go run ./cmd/tracker recommend pianists
 LLM_PROFILE=google LLM_MODEL=gemini-3.1-pro-preview go run ./cmd/tracker recommend pianists
+LLM_PROFILE=ollama LLM_PROVIDER=openai_compat LLM_MODEL=qwen2.5:latest LLM_BASE_URL=http://localhost:11434/v1 go run ./cmd/tracker recommend pianists
+LLM_PROFILE=deepseek go run ./cmd/tracker recommend pianists
+LLM_PROFILE=kimi go run ./cmd/tracker recommend pianists
 ```
 
 `LLM_*` env vars override profile settings. Legacy `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL` still work for the OpenAI path during migration.
+
+Notes:
+
+- recommendation generation deliberately over-requests candidates before Spotify validation, so `--limit 5` still has a better chance of producing 5 validated pianists
+- Anthropic and OpenAI-compatible backends may take one or more repair passes before the app gets a fully parseable recommendation list
+- slower Gemini models may need noticeably longer response times than OpenAI
 
 ## Current Limits
 
@@ -304,11 +319,11 @@ LLM_PROFILE=google LLM_MODEL=gemini-3.1-pro-preview go run ./cmd/tracker recomme
 - favorite-pianist ranking is deterministic but intentionally simple
 - LLM-backed recommendations suggest pianists, not tracks
 - the recommendation flow is only as good as the ratings and comments already in your local database
-- provider behavior differs: Anthropic may need fallback repair passes, and slower Gemini models can take noticeably longer to respond
+- provider behavior differs: Anthropic and some OpenAI-compatible models may need fallback repair passes, and slower Gemini models can take noticeably longer to respond
 
 ## Future Work
 
-- add OpenAI-compatible provider support for Ollama, Kimi, and DeepSeek
+- document example multi-provider config profiles directly in the README
 
 ## Command Summary
 

@@ -465,11 +465,8 @@ func parseDiscoveryPartial(raw string) (DiscoveryResult, string, error) {
 		return DiscoveryResult{}, cleaned, fmt.Errorf("decode LLM discovery response: %w", err)
 	}
 
-	if len(result.Recommendations) == 0 {
-		normalized, ok := parseDiscoveryAliases(cleaned)
-		if ok {
-			result = normalized
-		}
+	if normalized, ok := parseDiscoveryAliases(cleaned); ok && aliasResultIsBetter(normalized, result) {
+		result = normalized
 	}
 
 	return result, cleaned, nil
@@ -531,6 +528,38 @@ func parseDiscoveryAliasesMap(payload map[string]any) (DiscoveryResult, bool) {
 	}
 
 	return result, true
+}
+
+func aliasResultIsBetter(candidate DiscoveryResult, current DiscoveryResult) bool {
+	if len(candidate.Recommendations) == 0 {
+		return false
+	}
+	if len(current.Recommendations) == 0 {
+		return true
+	}
+
+	candidateScore := recommendationCompletenessScore(candidate.Recommendations)
+	currentScore := recommendationCompletenessScore(current.Recommendations)
+	return candidateScore > currentScore
+}
+
+func recommendationCompletenessScore(items []SuggestedPianist) int {
+	score := 0
+	for _, item := range items {
+		if strings.TrimSpace(item.PianistName) != "" {
+			score += 2
+		}
+		if strings.TrimSpace(item.WhyFit) != "" {
+			score += 2
+		}
+		if len(item.SimilarTo) > 0 {
+			score++
+		}
+		if strings.TrimSpace(item.Confidence) != "" {
+			score++
+		}
+	}
+	return score
 }
 
 func previewJSON(cleaned string) string {

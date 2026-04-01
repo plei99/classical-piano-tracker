@@ -45,7 +45,11 @@ func (c *Client) SuggestNewPianists(ctx context.Context, summary recommend.Taste
 		return recommend.DiscoveryResult{}, err
 	}
 
+	lastSummary := ""
 	result, err := recommend.ParseDiscoveryResult(raw)
+	if partial, partialErr := recommend.ParseDiscoveryPartial(raw); partialErr == nil && strings.TrimSpace(partial.Summary) != "" {
+		lastSummary = partial.Summary
+	}
 	for attempt := 0; err != nil && shouldRepairDiscoveryResponse(err) && attempt < maxDiscoveryRepairAttempts; attempt++ {
 		repairedRaw, repairErr := c.provider.Generate(ctx, buildDiscoveryRepairRequest(raw, limit, attempt+1))
 		if repairErr != nil {
@@ -53,10 +57,17 @@ func (c *Client) SuggestNewPianists(ctx context.Context, summary recommend.Taste
 		}
 		raw = repairedRaw
 		result, err = recommend.ParseDiscoveryResult(raw)
+		if partial, partialErr := recommend.ParseDiscoveryPartial(raw); partialErr == nil && strings.TrimSpace(partial.Summary) != "" {
+			lastSummary = partial.Summary
+		}
 	}
-	if err != nil && strings.Contains(err.Error(), "omitted recommendations") {
+	if err != nil && shouldFallbackRecommendationRecovery(err) {
 		partial, partialErr := recommend.ParseDiscoveryPartial(raw)
+		summaryText := lastSummary
 		if partialErr == nil && strings.TrimSpace(partial.Summary) != "" {
+			summaryText = partial.Summary
+		}
+		if strings.TrimSpace(summaryText) != "" {
 			supplementReq, buildErr := buildDiscoveryRecommendationsOnlyRequest(summary, limit)
 			if buildErr == nil {
 				supplementRaw, supplementErr := c.provider.Generate(ctx, supplementReq)
@@ -64,7 +75,7 @@ func (c *Client) SuggestNewPianists(ctx context.Context, summary recommend.Taste
 					recommendations, parseSupplementErr := recommend.ParseDiscoveryRecommendations(supplementRaw)
 					if parseSupplementErr == nil {
 						result = recommend.DiscoveryResult{
-							Summary:         partial.Summary,
+							Summary:         summaryText,
 							Recommendations: recommendations,
 						}
 						err = nil
@@ -79,7 +90,7 @@ func (c *Client) SuggestNewPianists(ctx context.Context, summary recommend.Taste
 						recommendations, parsePlainErr := recommend.ParsePlaintextRecommendations(plainRaw)
 						if parsePlainErr == nil {
 							result = recommend.DiscoveryResult{
-								Summary:         partial.Summary,
+								Summary:         summaryText,
 								Recommendations: recommendations,
 							}
 							err = nil
@@ -106,6 +117,16 @@ func shouldRepairDiscoveryResponse(err error) bool {
 	message := err.Error()
 	return strings.Contains(message, "omitted summary") ||
 		strings.Contains(message, "omitted recommendations") ||
+		strings.Contains(message, "omitted pianist_name") ||
+		strings.Contains(message, "omitted why_fit")
+}
+
+func shouldFallbackRecommendationRecovery(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "omitted recommendations") ||
 		strings.Contains(message, "omitted pianist_name") ||
 		strings.Contains(message, "omitted why_fit")
 }

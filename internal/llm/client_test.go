@@ -204,6 +204,45 @@ func TestClientSuggestNewPianistsFallsBackToPlaintextRecommendations(t *testing.
 	}
 }
 
+func TestClientSuggestNewPianistsRecoversFromMissingPianistName(t *testing.T) {
+	t.Parallel()
+
+	provider := &stubProvider{
+		raws: []string{
+			`{"summary":"partial summary","recommendations":[{"why_fit":"missing name","similar_to":["Martha Argerich"],"confidence":"medium"}]}`,
+			`{"summary":"repair one","recommendations":[{"why_fit":"still missing name","similar_to":["Martha Argerich"],"confidence":"medium"}]}`,
+			`{"summary":"repair two","recommendations":[{"why_fit":"still missing name","similar_to":["Martha Argerich"],"confidence":"medium"}]}`,
+			`{"summary":"repair three","recommendations":[{"why_fit":"still missing name","similar_to":["Martha Argerich"],"confidence":"medium"}]}`,
+			`{"recommendations":[{"name":"Radu Lupu","reason":"lyrical contrast","similar":["Martha Argerich"],"confidence":"medium"}]}`,
+		},
+	}
+	client, err := NewClient(provider)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	result, err := client.SuggestNewPianists(context.Background(), recommend.TasteSummary{
+		TotalRatings:     3,
+		FavoritePianists: []recommend.FavoritePianist{{Name: "Martha Argerich"}},
+		KnownPianists:    []string{"Martha Argerich"},
+	}, 1)
+	if err != nil {
+		t.Fatalf("SuggestNewPianists() error = %v", err)
+	}
+	if result.Summary != "repair three" {
+		t.Fatalf("Summary = %q, want final repaired summary", result.Summary)
+	}
+	if len(result.Recommendations) != 1 || result.Recommendations[0].PianistName != "Radu Lupu" {
+		t.Fatalf("unexpected recommendations: %+v", result.Recommendations)
+	}
+	if len(provider.reqs) != 5 {
+		t.Fatalf("len(provider.reqs) = %d, want 5 including recommendations-only fallback", len(provider.reqs))
+	}
+	if provider.reqs[4].Schema == nil || provider.reqs[4].Schema.Name != "pianist_recommendations_only" {
+		t.Fatalf("provider.reqs[4].Schema = %#v, want recommendations-only schema", provider.reqs[4].Schema)
+	}
+}
+
 func TestClientSuggestNewPianistsRequiresAtLeastFiveRecommendationsWhenLimitIsHigher(t *testing.T) {
 	t.Parallel()
 

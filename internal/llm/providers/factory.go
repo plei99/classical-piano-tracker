@@ -23,6 +23,11 @@ func FromConfig(cfg *config.Config) (llm.Provider, error) {
 		return NewAnthropic(profile.APIKey, profile.Model, profile.BaseURL, nil)
 	case "google":
 		return NewGoogle(profile.APIKey, profile.Model, profile.BaseURL, nil)
+	case "openai_compat":
+		if strings.TrimSpace(profile.BaseURL) == "" {
+			profile.BaseURL = defaultOpenAICompatBaseURLForProfile(profileName)
+		}
+		return NewOpenAICompat(profile.APIKey, profile.Model, profile.BaseURL, nil)
 	default:
 		return nil, fmt.Errorf("LLM provider %q for profile %q is not implemented yet", profile.Provider, profileName)
 	}
@@ -103,5 +108,16 @@ func providerAPIKeyEnvVars(profileName string, provider string) []string {
 		}
 	default:
 		return nil
+	}
+}
+
+func defaultOpenAICompatBaseURLForProfile(profileName string) string {
+	switch strings.ToLower(strings.TrimSpace(profileName)) {
+	case "deepseek":
+		return "https://api.deepseek.com/v1"
+	case "kimi":
+		return "https://api.moonshot.ai/v1"
+	default:
+		return defaultOpenAICompatBaseURL
 	}
 }

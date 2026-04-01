@@ -117,7 +117,7 @@ func TestFromConfigSupportsGoogleProfile(t *testing.T) {
 	}
 }
 
-func TestFromConfigRejectsStillUnsupportedProvider(t *testing.T) {
+func TestFromConfigSupportsOpenAICompatProfile(t *testing.T) {
 	provider, err := FromConfig(&config.Config{
 		LLM: config.LLMConfig{
 			ActiveProfile: "ollama",
@@ -125,12 +125,52 @@ func TestFromConfigRejectsStillUnsupportedProvider(t *testing.T) {
 				"ollama": {
 					Provider: "openai_compat",
 					Model:    "qwen2.5:latest",
-					BaseURL:  "http://localhost:11434/v1",
 				},
 			},
 		},
 	})
-	if err == nil {
-		t.Fatalf("FromConfig() error = nil, provider = %#v", provider)
+	if err != nil {
+		t.Fatalf("FromConfig() error = %v", err)
+	}
+
+	openAICompat, ok := provider.(*openAICompatProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *openAICompatProvider", provider)
+	}
+	if openAICompat.baseURL != "http://localhost:11434/v1" {
+		t.Fatalf("baseURL = %q, want Ollama default", openAICompat.baseURL)
+	}
+	if openAICompat.apiKey != "" {
+		t.Fatalf("apiKey = %q, want empty for Ollama-compatible profile", openAICompat.apiKey)
+	}
+}
+
+func TestFromConfigUsesDeepSeekAPIKeyFallback(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "deepseek-key")
+
+	provider, err := FromConfig(&config.Config{
+		LLM: config.LLMConfig{
+			ActiveProfile: "deepseek",
+			Profiles: map[string]config.LLMProfile{
+				"deepseek": {
+					Provider: "openai_compat",
+					Model:    "deepseek-chat",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("FromConfig() error = %v", err)
+	}
+
+	openAICompat, ok := provider.(*openAICompatProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *openAICompatProvider", provider)
+	}
+	if openAICompat.apiKey != "deepseek-key" {
+		t.Fatalf("apiKey = %q, want deepseek-key", openAICompat.apiKey)
+	}
+	if openAICompat.baseURL != "https://api.deepseek.com/v1" {
+		t.Fatalf("baseURL = %q, want DeepSeek default", openAICompat.baseURL)
 	}
 }

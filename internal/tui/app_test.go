@@ -17,6 +17,7 @@ func TestUpdateTracksLoadedTriggersRatingLoad(t *testing.T) {
 	model := NewModel(nil, nil, nil)
 	msg := tracksLoadedMsg{
 		tracks: []db.Track{
+			{ID: 3, TrackName: "Track Three", Artists: `["Artist Three"]`, LastPlayedAt: 100},
 			{ID: 1, TrackName: "Track One", Artists: `["Artist One"]`, LastPlayedAt: 100},
 		},
 	}
@@ -28,6 +29,9 @@ func TestUpdateTracksLoadedTriggersRatingLoad(t *testing.T) {
 	}
 	if !got.loadingRating {
 		t.Fatal("loadingRating should be true after selecting the first track")
+	}
+	if len(got.tracks) != 2 || got.tracks[0].ID != 1 || got.tracks[1].ID != 3 {
+		t.Fatalf("tracks should be sorted by ID, got %+v", got.tracks)
 	}
 	if cmd == nil {
 		t.Fatal("expected rating load command")
@@ -320,7 +324,7 @@ func TestViewIncludesScrollableHint(t *testing.T) {
 	}
 
 	view := model.View()
-	if !strings.Contains(view, "Recent local listening history") {
+	if !strings.Contains(view, "Local track history") {
 		t.Fatalf("View() = %q, want main header", view)
 	}
 }

@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,7 +18,7 @@ import (
 	"github.com/plei99/classical-piano-tracker/internal/syncer"
 )
 
-const defaultRecentTrackLimit = 25
+const defaultRecentTrackLimit = 100
 
 const (
 	minPaneContentHeight   = 8
@@ -135,6 +137,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.err = nil
 		m.tracks = msg.tracks
+		sortTracksByID(m.tracks)
 		if len(m.tracks) == 0 {
 			m.selectedIndex = 0
 			m.selectedRating = nil
@@ -215,7 +218,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders a track browser with recent tracks, details, sync, and rating actions.
 func (m Model) View() string {
 	if m.loadingTracks {
-		return appStyle.Render(titleStyle.Render("Classical Piano Tracker") + "\n\nLoading recent local tracks...")
+		return appStyle.Render(titleStyle.Render("Classical Piano Tracker") + "\n\nLoading local tracks...")
 	}
 
 	if m.err != nil {
@@ -247,7 +250,7 @@ func (m Model) View() string {
 
 	return appStyle.Render(
 		titleStyle.Render("Classical Piano Tracker") + "\n" +
-			mutedStyle.Render("Recent local listening history") + "\n\n" +
+			mutedStyle.Render("Local track history") + "\n\n" +
 			body + "\n\n" +
 			statusBarStyle.Render(m.statusLine()),
 	)
@@ -305,7 +308,7 @@ func (m Model) layout() layout {
 
 func (m Model) renderList(width int, height int) string {
 	lines := []string{
-		titleStyle.Render("Recent Tracks"),
+		titleStyle.Render("Tracks"),
 		mutedStyle.Render(fmt.Sprintf("%d loaded", len(m.tracks))),
 		"",
 	}
@@ -627,6 +630,12 @@ func formatTrackArtists(raw string) string {
 	}
 
 	return strings.Join(artists, ", ")
+}
+
+func sortTracksByID(tracks []db.Track) {
+	slices.SortFunc(tracks, func(left db.Track, right db.Track) int {
+		return cmp.Compare(left.ID, right.ID)
+	})
 }
 
 func truncate(value string, width int) string {

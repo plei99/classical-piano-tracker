@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/plei99/classical-piano-tracker/internal/config"
+	"github.com/plei99/classical-piano-tracker/internal/recommend"
 	spotifyapi "github.com/zmb3/spotify/v2"
 	"golang.org/x/oauth2"
 )
@@ -103,6 +104,47 @@ func (c *Client) RecentTracks(ctx context.Context, limit int) ([]RecentTrack, er
 	}
 
 	return normalizeRecentlyPlayed(items), nil
+}
+
+// SearchArtists searches the Spotify catalog for matching artist records.
+func (c *Client) SearchArtists(ctx context.Context, query string, limit int) ([]recommend.CatalogArtist, error) {
+	if c == nil || c.api == nil {
+		return nil, errors.New("spotify client is not initialized")
+	}
+	if limit < 1 {
+		limit = 5
+	}
+
+	result, err := c.api.Search(ctx, query, spotifyapi.SearchTypeArtist, spotifyapi.Limit(limit))
+	if err != nil {
+		return nil, fmt.Errorf("search Spotify artists for %q: %w", query, err)
+	}
+	if result == nil || result.Artists == nil || len(result.Artists.Artists) == 0 {
+		if err := c.persistCurrentToken(); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
+	artists := make([]recommend.CatalogArtist, 0, len(result.Artists.Artists))
+	for _, artist := range result.Artists.Artists {
+		artistID := ""
+		if artist.ID != "" {
+			artistID = (&artist.ID).String()
+		}
+		artists = append(artists, recommend.CatalogArtist{
+			Name:       artist.Name,
+			ID:         artistID,
+			Popularity: int(artist.Popularity),
+			Genres:     append([]string(nil), artist.Genres...),
+		})
+	}
+
+	if err := c.persistCurrentToken(); err != nil {
+		return nil, err
+	}
+
+	return artists, nil
 }
 
 func normalizeRecentTrackLimit(limit int) (int, error) {

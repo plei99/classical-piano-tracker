@@ -44,6 +44,11 @@ FROM tracks
 ORDER BY play_count DESC, last_played_at DESC, id DESC
 LIMIT sqlc.arg(limit);
 
+-- name: ListAllTracks :many
+SELECT *
+FROM tracks
+ORDER BY id ASC;
+
 -- name: ListUnratedTracks :many
 SELECT t.*
 FROM tracks AS t
@@ -75,3 +80,8 @@ SELECT *
 FROM ratings
 WHERE track_id = sqlc.arg(track_id)
 LIMIT 1;
+
+-- name: ListAllRatings :many
+SELECT *
+FROM ratings
+ORDER BY updated_at DESC, track_id DESC;

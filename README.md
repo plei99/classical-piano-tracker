@@ -1,50 +1,242 @@
 # Classical Piano Tracker
 
-A CLI and TUI (Terminal UI) application for tracking, filtering, and rating your classical piano listening history on Spotify.
+A Go CLI/TUI for tracking, filtering, rating, and exploring your classical piano listening history from Spotify.
 
-## Architecture & Tech Stack
+## Stack
 
-This project is built in **Go** and prioritizes a clean, fast, single-binary execution model.
+- Go
+- Cobra for the CLI
+- Bubble Tea and Lip Gloss for the TUI
+- SQLite via `modernc.org/sqlite`
+- `sqlc` for all database access
+- Spotify via `zmb3/spotify`
 
-*   **Language**: Go
-*   **CLI Framework**: [Cobra](https://github.com/spf13/cobra)
-*   **TUI Framework**: [Bubbletea](https://github.com/charmbracelet/bubbletea) & Lipgloss (Charm ecosystem)
-*   **Database**: SQLite (pure Go via `modernc.org/sqlite`)
-*   **DB Code Generation**: [sqlc](https://sqlc.dev/)
-*   **Spotify Client**: `zmb3/spotify`
+## What It Does
 
-## Core Design Decisions
+- Sync your recent Spotify plays into a local SQLite database
+- Filter synced tracks through a pianist allowlist and artist blocklist
+- Rate tracks with stars and optional comments
+- Browse, sync, and rate tracks in a terminal UI
+- Rank your favorite pianists from local ratings and replay counts
+- Generate LLM-backed recommendations for new pianists, then validate them against Spotify
 
-### 1. Database Access (`sqlc`)
-We use `sqlc` to generate type-safe Go code from raw SQL queries. 
+## Local State
 
-The database maintains a unique dictionary of tracks rather than an append-only log of every single play.
-*   **`tracks` table**: Stores `spotify_id` (PK), metadata, `play_count`, and `last_played_at`. History syncs use SQLite `UPSERT` to bump the play count and update the timestamp for existing tracks.
-*   **`ratings` table**: Stores `track_id` (FK), `stars` (1-5), `opinion` (text), and `updated_at`.
+The app keeps config and data separate.
 
-### 2. State & Authentication
-All configuration, including OAuth tokens and curation filters, is stored locally in JSON format at:
-`~/.config/piano-tracker/config.json`
+- Config path:
+  resolved with `os.UserConfigDir()`
+  - macOS default: `~/Library/Application Support/piano-tracker/config.json`
+  - Linux default: `~/.config/piano-tracker/config.json`
+- Database path:
+  resolved with the user data directory
+  - macOS default: `~/Library/Application Support/piano-tracker/tracker.db`
+  - Linux default: `~/.local/share/piano-tracker/tracker.db`
 
-This file includes:
-*   Spotify `client_id` and `client_secret`
-*   OAuth `token` (access token, refresh token, expiry)
-*   Filtering lists (allowlist and blocklist)
+You can inspect or override them with:
 
-The CLI handles the initial OAuth flow by briefly spinning up a local web server (e.g., `localhost:8000/api/auth/spotify/callback`) to receive the authorization code.
+```bash
+tracker config path
+tracker --config /custom/config.json --db /custom/tracker.db ...
+```
 
-### 3. Track Filtering Logic
-Because Spotify does not provide granular track-level genres, we filter based on artist curation:
+## Build
 
-1. Fetch the 50 most recently played tracks from Spotify.
-2. For each track, evaluate its `Artists` array.
-3. **Blocklist Check**: If any artist is in `artists_blocklist` (e.g., "Yiruma"), skip the track entirely.
-4. **Allowlist Check**: If at least one artist is in `pianists_allowlist` (e.g., "Martha Argerich", "Daniil Trifonov"), process and save the track.
-5. Apply the `UPSERT` logic to the database.
+```bash
+go build ./...
+```
+
+To run without installing:
+
+```bash
+go run ./cmd/tracker --help
+```
+
+## First-Time Setup
+
+### 1. Generate the config file
+
+Any config-aware command will create a default config file if one does not exist yet.
+
+For example:
+
+```bash
+go run ./cmd/tracker config validate
+```
+
+Then edit the generated config file and set:
+
+- `spotify.client_id`
+- `spotify.client_secret`
+
+The default config also includes a populated `pianists_allowlist` and an empty `artists_blocklist`.
+
+### 2. Configure Spotify redirect URI
+
+In your Spotify developer app settings, add this redirect URI:
+
+```text
+http://127.0.0.1:8000/api/auth/spotify/callback
+```
+
+### 3. Run Spotify login
+
+```bash
+go run ./cmd/tracker spotify login
+```
+
+The CLI prints a URL to open in your browser. After login, the OAuth token is stored in the config file.
+
+## Core Workflow
+
+### Sync recent listening history
+
+```bash
+go run ./cmd/tracker sync
+```
+
+Optional:
+
+```bash
+go run ./cmd/tracker sync --limit 50
+```
+
+Sync behavior:
+
+1. Fetch recent Spotify plays
+2. Skip a track if any artist is in `artists_blocklist`
+3. Accept a track only if at least one artist is in `pianists_allowlist`
+4. UPSERT the track into SQLite by `spotify_id`
+5. Increment `play_count` and update `last_played_at` for repeat listens
+
+### Browse local tracks in the CLI
+
+```bash
+go run ./cmd/tracker list recent
+go run ./cmd/tracker list top
+go run ./cmd/tracker list unrated
+go run ./cmd/tracker show 12
+```
+
+### Rate tracks
+
+Strict rating by ID:
+
+```bash
+go run ./cmd/tracker rate --track-id 12 --stars 5 --opinion "Explosive and clear"
+```
+
+Interactive rating flow:
+
+```bash
+go run ./cmd/tracker rate-prompt
+go run ./cmd/tracker rate-prompt --unrated
+```
+
+### Use the TUI
+
+```bash
+go run ./cmd/tracker tui
+```
+
+Current TUI features:
+
+- browse local tracks
+- sync from Spotify
+- edit ratings inline
+- adaptive layout based on terminal size
+- terminal-native styling instead of a hardcoded color theme
+
+Main keys:
+
+- `j` / `k` or arrow keys: move
+- `s`: sync
+- `enter` or `e`: open rating editor
+- `r`: reload
+- `q`: quit
+
+Inside the rating editor:
+
+- `1`-`5`: set stars
+- type text: edit opinion
+- `backspace`: delete
+- `enter`: save
+- `esc`: cancel
+
+## Recommendations
+
+### Favorite pianists
+
+This is deterministic and local-only.
+
+```bash
+go run ./cmd/tracker recommend favorites
+go run ./cmd/tracker recommend favorites --limit 15
+```
+
+It ranks allowlisted pianists using:
+
+- star ratings
+- number of rated tracks
+- replay count
+- a small penalty for tiny sample sizes
+
+### New pianist recommendations
+
+This command:
+
+1. builds a taste summary from local ratings and comments
+2. asks an OpenAI model for new pianist names only
+3. validates those names against Spotify artist search
+
+Required environment variable:
+
+```bash
+export OPENAI_API_KEY=...
+```
+
+Optional overrides:
+
+```bash
+export OPENAI_MODEL=gpt-5.4
+export OPENAI_BASE_URL=https://api.openai.com/v1/responses
+```
+
+Run:
+
+```bash
+go run ./cmd/tracker recommend pianists
+go run ./cmd/tracker recommend pianists --limit 5
+```
+
+The default OpenAI model is `gpt-5.4`. `OPENAI_MODEL` overrides it.
+
+## Command Summary
+
+```text
+tracker config
+tracker list
+tracker rate
+tracker rate-prompt
+tracker recommend
+tracker show
+tracker spotify
+tracker sync
+tracker tui
+```
+
+## Development Notes
+
+- All DB access goes through `sqlc`-generated queries in `internal/db/`
+- The TUI keeps DB writes and network calls off the Bubble Tea `Update` loop by using `tea.Cmd`
+- Track artist lists are stored as JSON strings in SQLite and decoded in Go for filtering and recommendation logic
 
 ## Project Structure
-*   `cmd/tracker/`: Application entry point (`main.go`).
-*   `internal/cli/`: Cobra command definitions (`sync`, `rate`, etc.).
-*   `internal/tui/`: Bubbletea models, views, and update logic.
-*   `internal/db/`: SQLite schema, queries, and `sqlc` generated code.
-*   `internal/spotify/`: Spotify API integration and OAuth logic.
+
+- `cmd/tracker/`: application entrypoint
+- `internal/cli/`: Cobra commands
+- `internal/tui/`: Bubble Tea models and rendering
+- `internal/db/`: schema, queries, and generated DB code
+- `internal/spotify/`: Spotify auth and client integration
+- `internal/recommend/`: favorite-pianist and taste-summary logic
+- `internal/openai/`: OpenAI recommendation client

@@ -7,6 +7,7 @@ This document turns the architecture in `README.md` into an implementation seque
 - Build a Go-only CLI/TUI application for tracking classical piano listening history from Spotify.
 - Keep data local in SQLite and config/auth state in `~/.config/piano-tracker/config.json`.
 - Ship the core sync and rating workflows before investing in TUI polish.
+- Add a recommendation layer that combines deterministic favorite-pianist scoring with LLM-assisted pianist discovery.
 
 ## Principles
 
@@ -245,7 +246,47 @@ This document turns the architecture in `README.md` into an implementation seque
 - Sync and rating both work inside the TUI.
 - UI remains responsive during network and DB activity.
 
-## Phase 8: Testing and Hardening
+## Phase 8: Recommendations
+
+### Deliverables
+
+- Deterministic favorite-pianist calculation from local data
+- CLI output for favorite pianists
+- LLM-backed recommendation flow for discovering new pianists
+- Validation layer for LLM-generated pianist suggestions
+
+### Scope
+
+- The deterministic layer ranks pianists already present in the local database.
+- The LLM layer recommends new pianists, not specific tracks.
+- The LLM should use star ratings and free-form rating comments as its main taste inputs.
+- The app should validate suggested pianists before treating them as actionable recommendations.
+
+### Tasks
+
+1. Add a recommendation package for taste profiling and pianist ranking.
+2. Decode track artist JSON and attribute ratings and play counts to pianist profiles.
+3. Design a deterministic favorite score using:
+  - average stars
+  - number of rated tracks
+  - replay count
+  - a penalty for tiny sample sizes
+4. Add a CLI command to print favorite pianists from the deterministic layer.
+5. Build a compact taste summary from:
+  - favorite pianists
+  - highly rated tracks
+  - low-rated tracks when available
+  - free-form rating comments
+6. Add an LLM-backed command that returns recommended new pianists in structured output.
+7. Validate LLM pianist names against a real catalog or search endpoint before presenting them as actionable recommendations.
+8. Degrade gracefully when there is too little ratings or comment data to make useful recommendations.
+
+### Exit Criteria
+
+- The app can rank favorite pianists deterministically from the local DB.
+- The app can generate and validate new pianist recommendations from an LLM without relying on hallucinated track names.
+
+## Phase 9: Testing and Hardening
 
 ### High-Priority Tests
 
@@ -255,20 +296,23 @@ This document turns the architecture in `README.md` into an implementation seque
 - Ratings persistence
 - Spotify response mapping
 - CLI command behavior for common failure paths
+- Favorite-pianist scoring behavior
+- Recommendation prompt/input shaping and structured output validation
 
 ### Tasks
 
 1. Add unit tests around pure logic first.
 2. Add DB-backed tests using temporary SQLite files.
 3. Add integration coverage for sync orchestration where practical.
-4. Harden logging and error messages for auth, DB, and config failures.
+4. Add tests for recommendation ranking, sparse-data handling, and invalid LLM output.
+5. Harden logging and error messages for auth, DB, config, and recommendation failures.
 
 ### Exit Criteria
 
 - Core flows have regression coverage.
 - Expected user errors produce actionable messages.
 
-## Phase 9: Packaging and Usability
+## Phase 10: Packaging and Usability
 
 ### Deliverables
 
@@ -300,6 +344,7 @@ This document turns the architecture in `README.md` into an implementation seque
 8. Phase 7
 9. Phase 8
 10. Phase 9
+11. Phase 10
 
 ## First Implementation Slice
 

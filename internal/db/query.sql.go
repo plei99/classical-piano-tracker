@@ -74,6 +74,78 @@ func (q *Queries) GetTrackBySpotifyID(ctx context.Context, spotifyID string) (Tr
 	return i, err
 }
 
+const listAllRatings = `-- name: ListAllRatings :many
+SELECT track_id, stars, opinion, updated_at
+FROM ratings
+ORDER BY updated_at DESC, track_id DESC
+`
+
+func (q *Queries) ListAllRatings(ctx context.Context) ([]Rating, error) {
+	rows, err := q.db.QueryContext(ctx, listAllRatings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Rating
+	for rows.Next() {
+		var i Rating
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.Stars,
+			&i.Opinion,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllTracks = `-- name: ListAllTracks :many
+SELECT id, spotify_id, track_name, album_name, artists, play_count, last_played_at, created_at
+FROM tracks
+ORDER BY id ASC
+`
+
+func (q *Queries) ListAllTracks(ctx context.Context) ([]Track, error) {
+	rows, err := q.db.QueryContext(ctx, listAllTracks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Track
+	for rows.Next() {
+		var i Track
+		if err := rows.Scan(
+			&i.ID,
+			&i.SpotifyID,
+			&i.TrackName,
+			&i.AlbumName,
+			&i.Artists,
+			&i.PlayCount,
+			&i.LastPlayedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentTracks = `-- name: ListRecentTracks :many
 SELECT id, spotify_id, track_name, album_name, artists, play_count, last_played_at, created_at
 FROM tracks

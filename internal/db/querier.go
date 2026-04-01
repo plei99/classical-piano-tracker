@@ -12,6 +12,8 @@ type Querier interface {
 	GetRatingByTrackID(ctx context.Context, trackID int64) (Rating, error)
 	GetTrackByID(ctx context.Context, id int64) (Track, error)
 	GetTrackBySpotifyID(ctx context.Context, spotifyID string) (Track, error)
+	ListAllRatings(ctx context.Context) ([]Rating, error)
+	ListAllTracks(ctx context.Context) ([]Track, error)
 	ListRecentTracks(ctx context.Context, limit int64) ([]Track, error)
 	ListTopPlayedTracks(ctx context.Context, limit int64) ([]Track, error)
 	ListUnratedTracks(ctx context.Context, limit int64) ([]Track, error)

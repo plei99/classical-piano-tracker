@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plei99/classical-piano-tracker/internal/config"
 	"github.com/plei99/classical-piano-tracker/internal/recommend"
 )
 
@@ -44,9 +45,16 @@ type responseEnvelope struct {
 }
 
 func FromEnv() (*Client, error) {
+	return FromConfig(config.OpenAIConfig{})
+}
+
+func FromConfig(cfg config.OpenAIConfig) (*Client, error) {
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {
-		return nil, errors.New("OPENAI_API_KEY is required for LLM-backed recommendations")
+		apiKey = strings.TrimSpace(cfg.APIKey)
+	}
+	if apiKey == "" {
+		return nil, errors.New("OpenAI API key is required; set OPENAI_API_KEY or configure openai.api_key")
 	}
 
 	model := strings.TrimSpace(os.Getenv("OPENAI_MODEL"))

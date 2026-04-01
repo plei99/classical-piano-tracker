@@ -127,7 +127,7 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 				return err
 			}
 
-			llmClient, err := openai.FromEnv()
+			llmClient, err := openai.FromConfig(cfg.OpenAI)
 			if err != nil {
 				return err
 			}

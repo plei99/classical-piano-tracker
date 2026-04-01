@@ -39,6 +39,9 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 				Expiry:       time.Date(2026, time.March, 31, 12, 0, 0, 0, time.UTC),
 			},
 		},
+		OpenAI: OpenAIConfig{
+			APIKey: "openai-key",
+		},
 		PianistsAllowlist: []string{"Martha Argerich", "Daniil Trifonov"},
 		ArtistsBlocklist:  []string{"Yiruma"},
 	}
@@ -86,6 +89,9 @@ func TestEnsureCreatesDefaultConfigWhenMissing(t *testing.T) {
 	}
 	if cfg.Spotify.ClientID != "" || cfg.Spotify.ClientSecret != "" {
 		t.Fatalf("default config should not contain Spotify credentials: %#v", cfg.Spotify)
+	}
+	if cfg.OpenAI.APIKey != "" {
+		t.Fatalf("default config should not contain an OpenAI API key: %#v", cfg.OpenAI)
 	}
 	if len(cfg.PianistsAllowlist) == 0 {
 		t.Fatal("default config should include a populated pianist allowlist")

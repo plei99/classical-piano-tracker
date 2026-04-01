@@ -38,6 +38,7 @@ func NewRootCmd() *cobra.Command {
 
 	cmd.AddCommand(newConfigCmd(opts))
 	cmd.AddCommand(newListCmd(opts))
+	cmd.AddCommand(newOnboardingCmd(opts))
 	cmd.AddCommand(newRateCmd(opts))
 	cmd.AddCommand(newRatePromptCmd(opts))
 	cmd.AddCommand(newRecommendCmd(opts))

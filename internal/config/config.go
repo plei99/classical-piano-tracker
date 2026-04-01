@@ -111,6 +111,7 @@ var defaultPianistsAllowlist = []string{
 // Config stores local application state and curation filters.
 type Config struct {
 	Spotify           SpotifyConfig `json:"spotify"`
+	OpenAI            OpenAIConfig  `json:"openai,omitempty"`
 	PianistsAllowlist []string      `json:"pianists_allowlist"`
 	ArtistsBlocklist  []string      `json:"artists_blocklist"`
 }
@@ -120,6 +121,11 @@ type SpotifyConfig struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 	Token        *Token `json:"token,omitempty"`
+}
+
+// OpenAIConfig stores optional OpenAI settings used for recommendations.
+type OpenAIConfig struct {
+	APIKey string `json:"api_key,omitempty"`
 }
 
 // Token stores the persisted OAuth token state.
@@ -143,9 +149,15 @@ func (e *ValidationError) Error() string {
 func Default() *Config {
 	return &Config{
 		Spotify:           SpotifyConfig{},
+		OpenAI:            OpenAIConfig{},
 		PianistsAllowlist: append([]string(nil), defaultPianistsAllowlist...),
 		ArtistsBlocklist:  []string{},
 	}
+}
+
+// DefaultPianistsAllowlist returns a copy of the built-in pianist seed list.
+func DefaultPianistsAllowlist() []string {
+	return append([]string(nil), defaultPianistsAllowlist...)
 }
 
 // OAuthToken returns the config token as an oauth2 token.

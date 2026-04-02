@@ -18,7 +18,8 @@ func TestUpdateTracksLoadedTriggersRatingLoad(t *testing.T) {
 	msg := tracksLoadedMsg{
 		tracks: []db.Track{
 			{ID: 3, TrackName: "Track Three", Artists: `["Artist Three"]`, LastPlayedAt: 100},
-			{ID: 1, TrackName: "Track One", Artists: `["Artist One"]`, LastPlayedAt: 100},
+			{ID: 1, TrackName: "Track One", Artists: `["Artist One"]`, LastPlayedAt: 200},
+			{ID: 2, TrackName: "Track Two", Artists: `["Artist Two"]`, LastPlayedAt: 100},
 		},
 	}
 
@@ -30,11 +31,37 @@ func TestUpdateTracksLoadedTriggersRatingLoad(t *testing.T) {
 	if !got.loadingRating {
 		t.Fatal("loadingRating should be true after selecting the first track")
 	}
-	if len(got.tracks) != 2 || got.tracks[0].ID != 1 || got.tracks[1].ID != 3 {
-		t.Fatalf("tracks should be sorted by ID, got %+v", got.tracks)
+	if len(got.tracks) != 3 || got.tracks[0].ID != 1 || got.tracks[1].ID != 3 || got.tracks[2].ID != 2 {
+		t.Fatalf("tracks should be sorted by recent desc, got %+v", got.tracks)
 	}
 	if cmd == nil {
 		t.Fatal("expected rating load command")
+	}
+}
+
+func TestUpdateTracksLoadedPreservesSelectedTrackAcrossReload(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		tracks:         []db.Track{{ID: 7}, {ID: 9}},
+		selectedIndex:  1,
+		selectedRating: &db.Rating{TrackID: 9, Stars: 4},
+		ratingKnown:    true,
+	}
+
+	updated, cmd := model.Update(tracksLoadedMsg{
+		tracks: []db.Track{
+			{ID: 5, TrackName: "Five", Artists: `["Artist Five"]`, LastPlayedAt: 300},
+			{ID: 9, TrackName: "Nine", Artists: `["Artist Nine"]`, LastPlayedAt: 200},
+			{ID: 7, TrackName: "Seven", Artists: `["Artist Seven"]`, LastPlayedAt: 100},
+		},
+	})
+	got := updated.(Model)
+	if got.selectedTrack() == nil || got.selectedTrack().ID != 9 {
+		t.Fatalf("selected track after reload = %+v, want track 9", got.selectedTrack())
+	}
+	if cmd == nil {
+		t.Fatal("expected rating load command for preserved selection")
 	}
 }
 

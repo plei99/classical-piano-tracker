@@ -18,8 +18,6 @@ import (
 	"github.com/plei99/classical-piano-tracker/internal/syncer"
 )
 
-const defaultRecentTrackLimit = 100
-
 const (
 	minPaneContentHeight   = 8
 	verticalLayoutWidthCut = 90
@@ -135,9 +133,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		var selectedTrackID int64
+		if track := m.selectedTrack(); track != nil {
+			selectedTrackID = track.ID
+		}
+
 		m.err = nil
 		m.tracks = msg.tracks
-		sortTracksByID(m.tracks)
+		sortTracksByRecentDesc(m.tracks)
 		if len(m.tracks) == 0 {
 			m.selectedIndex = 0
 			m.selectedRating = nil
@@ -146,6 +149,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if selectedTrackID != 0 {
+			if idx := indexOfTrackID(m.tracks, selectedTrackID); idx >= 0 {
+				m.selectedIndex = idx
+			}
+		}
 		if m.selectedIndex >= len(m.tracks) {
 			m.selectedIndex = len(m.tracks) - 1
 		}
@@ -519,7 +527,7 @@ func (m Model) selectedTrack() *db.Track {
 
 func (m Model) loadTracksCmd() tea.Cmd {
 	return func() tea.Msg {
-		tracks, err := m.queries.ListRecentTracks(context.Background(), defaultRecentTrackLimit)
+		tracks, err := m.queries.ListAllTracks(context.Background())
 		return tracksLoadedMsg{tracks: tracks, err: err}
 	}
 }
@@ -632,10 +640,23 @@ func formatTrackArtists(raw string) string {
 	return strings.Join(artists, ", ")
 }
 
-func sortTracksByID(tracks []db.Track) {
+func sortTracksByRecentDesc(tracks []db.Track) {
 	slices.SortFunc(tracks, func(left db.Track, right db.Track) int {
-		return cmp.Compare(left.ID, right.ID)
+		if byPlayedAt := cmp.Compare(right.LastPlayedAt, left.LastPlayedAt); byPlayedAt != 0 {
+			return byPlayedAt
+		}
+		return cmp.Compare(right.ID, left.ID)
 	})
+}
+
+func indexOfTrackID(tracks []db.Track, trackID int64) int {
+	for idx, track := range tracks {
+		if track.ID == trackID {
+			return idx
+		}
+	}
+
+	return -1
 }
 
 func truncate(value string, width int) string {

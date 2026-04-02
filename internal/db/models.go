@@ -11,6 +11,11 @@ type Rating struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type SyncState struct {
+	Key   string `json:"key"`
+	Value int64  `json:"value"`
+}
+
 type Track struct {
 	ID           int64  `json:"id"`
 	SpotifyID    string `json:"spotify_id"`

@@ -67,6 +67,23 @@ func TestInitAndQueryFlow(t *testing.T) {
 		t.Fatalf("updated track album_name = %q, want remastered title", updatedTrack.AlbumName)
 	}
 
+	olderReplay, err := q.UpsertTrack(ctx, UpsertTrackParams{
+		SpotifyID:    "spotify-track-1",
+		TrackName:    "Piano Sonata No. 14",
+		AlbumName:    "Beethoven Favorites (Earlier Replay)",
+		Artists:      `["Martha Argerich"]`,
+		LastPlayedAt: 150,
+	})
+	if err != nil {
+		t.Fatalf("UpsertTrack(older replay) error = %v", err)
+	}
+	if olderReplay.PlayCount != 3 {
+		t.Fatalf("older replay play_count = %d, want 3", olderReplay.PlayCount)
+	}
+	if olderReplay.LastPlayedAt != 200 {
+		t.Fatalf("older replay last_played_at = %d, want 200", olderReplay.LastPlayedAt)
+	}
+
 	secondTrack, err := q.UpsertTrack(ctx, UpsertTrackParams{
 		SpotifyID:    "spotify-track-2",
 		TrackName:    "Piano Concerto No. 2",
@@ -112,8 +129,25 @@ func TestInitAndQueryFlow(t *testing.T) {
 	if len(topPlayedTracks) != 2 {
 		t.Fatalf("ListTopPlayedTracks() len = %d, want 2", len(topPlayedTracks))
 	}
-	if topPlayedTracks[0].PlayCount != 2 {
-		t.Fatalf("ListTopPlayedTracks()[0].play_count = %d, want 2", topPlayedTracks[0].PlayCount)
+	if topPlayedTracks[0].PlayCount != 3 {
+		t.Fatalf("ListTopPlayedTracks()[0].play_count = %d, want 3", topPlayedTracks[0].PlayCount)
+	}
+
+	checkpoint, err := q.GetRecentPlayCheckpoint(ctx)
+	if err == nil {
+		t.Fatalf("GetRecentPlayCheckpoint() error = nil, want no rows before checkpoint is set")
+	}
+
+	if err := q.UpsertRecentPlayCheckpoint(ctx, 999); err != nil {
+		t.Fatalf("UpsertRecentPlayCheckpoint() error = %v", err)
+	}
+
+	checkpoint, err = q.GetRecentPlayCheckpoint(ctx)
+	if err != nil {
+		t.Fatalf("GetRecentPlayCheckpoint() after set error = %v", err)
+	}
+	if checkpoint != 999 {
+		t.Fatalf("GetRecentPlayCheckpoint() = %d, want 999", checkpoint)
 	}
 
 	unratedTracks, err := q.ListUnratedTracks(ctx, 10)

@@ -28,6 +28,20 @@ func (q *Queries) GetRatingByTrackID(ctx context.Context, trackID int64) (Rating
 	return i, err
 }
 
+const getRecentPlayCheckpoint = `-- name: GetRecentPlayCheckpoint :one
+SELECT value
+FROM sync_state
+WHERE key = 'recent_played_checkpoint'
+LIMIT 1
+`
+
+func (q *Queries) GetRecentPlayCheckpoint(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getRecentPlayCheckpoint)
+	var value int64
+	err := row.Scan(&value)
+	return value, err
+}
+
 const getTrackByID = `-- name: GetTrackByID :one
 SELECT id, spotify_id, track_name, album_name, artists, play_count, last_played_at, created_at
 FROM tracks
@@ -114,6 +128,8 @@ FROM tracks
 ORDER BY id ASC
 `
 
+// Recommendation and TUI flows need the full local corpus, so these "all"
+// queries remain explicit instead of overloading the paginated list queries.
 func (q *Queries) ListAllTracks(ctx context.Context) ([]Track, error) {
 	rows, err := q.db.QueryContext(ctx, listAllTracks)
 	if err != nil {
@@ -308,6 +324,23 @@ func (q *Queries) UpsertRating(ctx context.Context, arg UpsertRatingParams) (Rat
 	return i, err
 }
 
+const upsertRecentPlayCheckpoint = `-- name: UpsertRecentPlayCheckpoint :exec
+INSERT INTO sync_state (
+    key,
+    value
+) VALUES (
+    'recent_played_checkpoint',
+    ?1
+)
+ON CONFLICT (key) DO UPDATE SET
+    value = excluded.value
+`
+
+func (q *Queries) UpsertRecentPlayCheckpoint(ctx context.Context, value int64) error {
+	_, err := q.db.ExecContext(ctx, upsertRecentPlayCheckpoint, value)
+	return err
+}
+
 const upsertTrack = `-- name: UpsertTrack :one
 INSERT INTO tracks (
     spotify_id,
@@ -327,7 +360,7 @@ ON CONFLICT (spotify_id) DO UPDATE SET
     album_name = excluded.album_name,
     artists = excluded.artists,
     play_count = tracks.play_count + 1,
-    last_played_at = excluded.last_played_at
+    last_played_at = MAX(tracks.last_played_at, excluded.last_played_at)
 RETURNING id, spotify_id, track_name, album_name, artists, play_count, last_played_at, created_at
 `
 
@@ -339,6 +372,8 @@ type UpsertTrackParams struct {
 	LastPlayedAt int64  `json:"last_played_at"`
 }
 
+// Sync writes use a single UPSERT so replayed tracks increment play_count
+// instead of generating duplicate rows.
 func (q *Queries) UpsertTrack(ctx context.Context, arg UpsertTrackParams) (Track, error) {
 	row := q.db.QueryRowContext(ctx, upsertTrack,
 		arg.SpotifyID,

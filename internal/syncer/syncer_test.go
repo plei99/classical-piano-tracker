@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -106,6 +107,7 @@ func TestRun(t *testing.T) {
 		},
 	}
 	store := &fakeStore{
+		checkpoint: 0,
 		results: []db.Track{
 			{PlayCount: 1},
 			{PlayCount: 2},
@@ -117,14 +119,69 @@ func TestRun(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	if stats.Fetched != 4 || stats.Blocked != 1 || stats.Skipped != 1 || stats.Accepted != 2 || stats.Inserted != 1 || stats.Updated != 1 {
-		t.Fatalf("Run() stats = %+v, want fetched=4 blocked=1 skipped=1 accepted=2 inserted=1 updated=1", stats)
+	if stats.Fetched != 4 || stats.AlreadySynced != 0 || stats.Blocked != 1 || stats.Skipped != 1 || stats.Accepted != 2 || stats.Inserted != 1 || stats.Updated != 1 {
+		t.Fatalf("Run() stats = %+v, want fetched=4 already_synced=0 blocked=1 skipped=1 accepted=2 inserted=1 updated=1", stats)
 	}
 	if len(store.calls) != 2 {
 		t.Fatalf("store.UpsertTrack() calls = %d, want 2", len(store.calls))
 	}
 	if store.calls[0].Artists != `["Martha Argerich"]` {
 		t.Fatalf("encoded artists = %q, want JSON array", store.calls[0].Artists)
+	}
+	if store.checkpoint != now.UnixNano() {
+		t.Fatalf("checkpoint = %d, want %d", store.checkpoint, now.UnixNano())
+	}
+}
+
+func TestRunSkipsAlreadySyncedRecentPlays(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		PianistsAllowlist: []string{"Martha Argerich"},
+	}
+
+	base := time.Date(2026, time.April, 1, 10, 0, 0, 0, time.UTC)
+	source := fakeSource{
+		tracks: []spotify.RecentTrack{
+			{
+				SpotifyID: "older",
+				Name:      "Older",
+				AlbumName: "Album",
+				Artists:   []spotify.Artist{{Name: "Martha Argerich"}},
+				PlayedAt:  base,
+			},
+			{
+				SpotifyID: "newer",
+				Name:      "Newer",
+				AlbumName: "Album",
+				Artists:   []spotify.Artist{{Name: "Martha Argerich"}},
+				PlayedAt:  base.Add(2 * time.Minute),
+			},
+		},
+	}
+	store := &fakeStore{
+		checkpoint: base.Add(time.Minute).UnixNano(),
+		results: []db.Track{
+			{PlayCount: 3},
+		},
+	}
+
+	stats, err := Run(context.Background(), cfg, source, store, 50)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if stats.Fetched != 2 || stats.AlreadySynced != 1 || stats.Accepted != 1 || stats.Updated != 1 {
+		t.Fatalf("Run() stats = %+v, want fetched=2 already_synced=1 accepted=1 updated=1", stats)
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("store.UpsertTrack() calls = %d, want 1", len(store.calls))
+	}
+	if store.calls[0].SpotifyID != "newer" {
+		t.Fatalf("synced spotify_id = %q, want newer", store.calls[0].SpotifyID)
+	}
+	if store.checkpoint != base.Add(2*time.Minute).UnixNano() {
+		t.Fatalf("checkpoint = %d, want %d", store.checkpoint, base.Add(2*time.Minute).UnixNano())
 	}
 }
 
@@ -137,8 +194,21 @@ func (f fakeSource) RecentTracks(_ context.Context, _ int) ([]spotify.RecentTrac
 }
 
 type fakeStore struct {
-	results []db.Track
-	calls   []db.UpsertTrackParams
+	checkpoint int64
+	results    []db.Track
+	calls      []db.UpsertTrackParams
+}
+
+func (f *fakeStore) GetRecentPlayCheckpoint(_ context.Context) (int64, error) {
+	if f.checkpoint == 0 {
+		return 0, sql.ErrNoRows
+	}
+	return f.checkpoint, nil
+}
+
+func (f *fakeStore) UpsertRecentPlayCheckpoint(_ context.Context, value int64) error {
+	f.checkpoint = value
+	return nil
 }
 
 func (f *fakeStore) UpsertTrack(_ context.Context, arg db.UpsertTrackParams) (db.Track, error) {

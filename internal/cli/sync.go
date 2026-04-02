@@ -64,6 +64,7 @@ func newSyncCmd(opts *rootOptions) *cobra.Command {
 
 			cmd.Printf("database: %s\n", databasePath)
 			cmd.Printf("fetched: %d\n", stats.Fetched)
+			cmd.Printf("already_synced: %d\n", stats.AlreadySynced)
 			cmd.Printf("blocked: %d\n", stats.Blocked)
 			cmd.Printf("skipped: %d\n", stats.Skipped)
 			cmd.Printf("accepted: %d\n", stats.Accepted)

@@ -10,14 +10,20 @@ import (
 
 type Querier interface {
 	GetRatingByTrackID(ctx context.Context, trackID int64) (Rating, error)
+	GetRecentPlayCheckpoint(ctx context.Context) (int64, error)
 	GetTrackByID(ctx context.Context, id int64) (Track, error)
 	GetTrackBySpotifyID(ctx context.Context, spotifyID string) (Track, error)
 	ListAllRatings(ctx context.Context) ([]Rating, error)
+	// Recommendation and TUI flows need the full local corpus, so these "all"
+	// queries remain explicit instead of overloading the paginated list queries.
 	ListAllTracks(ctx context.Context) ([]Track, error)
 	ListRecentTracks(ctx context.Context, limit int64) ([]Track, error)
 	ListTopPlayedTracks(ctx context.Context, limit int64) ([]Track, error)
 	ListUnratedTracks(ctx context.Context, limit int64) ([]Track, error)
 	UpsertRating(ctx context.Context, arg UpsertRatingParams) (Rating, error)
+	UpsertRecentPlayCheckpoint(ctx context.Context, value int64) error
+	// Sync writes use a single UPSERT so replayed tracks increment play_count
+	// instead of generating duplicate rows.
 	UpsertTrack(ctx context.Context, arg UpsertTrackParams) (Track, error)
 }
 

@@ -19,8 +19,25 @@ ON CONFLICT (spotify_id) DO UPDATE SET
     album_name = excluded.album_name,
     artists = excluded.artists,
     play_count = tracks.play_count + 1,
-    last_played_at = excluded.last_played_at
+    last_played_at = MAX(tracks.last_played_at, excluded.last_played_at)
 RETURNING *;
+
+-- name: GetRecentPlayCheckpoint :one
+SELECT value
+FROM sync_state
+WHERE key = 'recent_played_checkpoint'
+LIMIT 1;
+
+-- name: UpsertRecentPlayCheckpoint :exec
+INSERT INTO sync_state (
+    key,
+    value
+) VALUES (
+    'recent_played_checkpoint',
+    sqlc.arg(value)
+)
+ON CONFLICT (key) DO UPDATE SET
+    value = excluded.value;
 
 -- name: GetTrackByID :one
 SELECT *

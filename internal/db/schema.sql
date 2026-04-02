@@ -21,6 +21,11 @@ CREATE INDEX IF NOT EXISTS idx_tracks_last_played_at
 CREATE INDEX IF NOT EXISTS idx_tracks_play_count
     ON tracks (play_count DESC, last_played_at DESC, id DESC);
 
+CREATE TABLE IF NOT EXISTS sync_state (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS ratings (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
     stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),

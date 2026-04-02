@@ -2,9 +2,12 @@ package syncer
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/plei99/classical-piano-tracker/internal/config"
 	"github.com/plei99/classical-piano-tracker/internal/db"
@@ -18,6 +21,8 @@ type TrackSource interface {
 
 // TrackStore persists accepted tracks.
 type TrackStore interface {
+	GetRecentPlayCheckpoint(ctx context.Context) (int64, error)
+	UpsertRecentPlayCheckpoint(ctx context.Context, value int64) error
 	UpsertTrack(ctx context.Context, arg db.UpsertTrackParams) (db.Track, error)
 }
 
@@ -31,12 +36,13 @@ const (
 
 // Stats captures the outcome of a sync run.
 type Stats struct {
-	Fetched  int
-	Blocked  int
-	Skipped  int
-	Accepted int
-	Inserted int
-	Updated  int
+	Fetched       int
+	Blocked       int
+	Skipped       int
+	Accepted      int
+	Inserted      int
+	Updated       int
+	AlreadySynced int
 }
 
 // Decide reports whether a track should be synced based on the config filters.
@@ -76,8 +82,23 @@ func Run(ctx context.Context, cfg *config.Config, source TrackSource, store Trac
 	}
 
 	stats.Fetched = len(tracks)
+	checkpointNS, err := store.GetRecentPlayCheckpoint(ctx)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return stats, fmt.Errorf("load recent play checkpoint: %w", err)
+	}
+
+	maxProcessedNS := checkpointNS
 
 	for _, track := range tracks {
+		playedAtNS := track.PlayedAt.UnixNano()
+		if playedAtNS > maxProcessedNS {
+			maxProcessedNS = playedAtNS
+		}
+		if checkpointNS != 0 && !track.PlayedAt.After(time.Unix(0, checkpointNS)) {
+			stats.AlreadySynced++
+			continue
+		}
+
 		switch Decide(cfg, track) {
 		case DecisionBlock:
 			stats.Blocked++
@@ -108,6 +129,12 @@ func Run(ctx context.Context, cfg *config.Config, source TrackSource, store Trac
 			stats.Inserted++
 		} else {
 			stats.Updated++
+		}
+	}
+
+	if maxProcessedNS > checkpointNS {
+		if err := store.UpsertRecentPlayCheckpoint(ctx, maxProcessedNS); err != nil {
+			return stats, fmt.Errorf("persist recent play checkpoint: %w", err)
 		}
 	}
 

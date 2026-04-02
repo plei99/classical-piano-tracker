@@ -60,8 +60,8 @@ func TestUpdateTracksLoadedPreservesSelectedTrackAcrossReload(t *testing.T) {
 	if got.selectedTrack() == nil || got.selectedTrack().ID != 9 {
 		t.Fatalf("selected track after reload = %+v, want track 9", got.selectedTrack())
 	}
-	if cmd == nil {
-		t.Fatal("expected rating load command for preserved selection")
+	if cmd != nil {
+		t.Fatal("rating should not reload when the preserved selection already has known rating state")
 	}
 }
 
@@ -201,6 +201,108 @@ func TestSortKeyCyclesOrderAndPreservesSelectedTrack(t *testing.T) {
 	}
 	if got.tracks[0].ID != 4 || got.tracks[1].ID != 7 || got.tracks[2].ID != 10 {
 		t.Fatalf("tracks after ID sort = %+v, want IDs 4,7,10", got.tracks)
+	}
+}
+
+func TestSearchFiltersTracksAndEnterExitsSearchMode(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		allTracks: []db.Track{
+			{ID: 3, TrackName: "Ballade No. 1", AlbumName: "Chopin", Artists: `["Martha Argerich"]`, LastPlayedAt: 300},
+			{ID: 2, TrackName: "Images", AlbumName: "Debussy", Artists: `["Seong-Jin Cho"]`, LastPlayedAt: 200},
+			{ID: 1, TrackName: "Etudes", AlbumName: "Ligeti", Artists: `["Yuja Wang"]`, LastPlayedAt: 100},
+		},
+		tracks: []db.Track{
+			{ID: 3, TrackName: "Ballade No. 1", AlbumName: "Chopin", Artists: `["Martha Argerich"]`, LastPlayedAt: 300},
+			{ID: 2, TrackName: "Images", AlbumName: "Debussy", Artists: `["Seong-Jin Cho"]`, LastPlayedAt: 200},
+			{ID: 1, TrackName: "Etudes", AlbumName: "Ligeti", Artists: `["Yuja Wang"]`, LastPlayedAt: 100},
+		},
+		ratingKnown: true,
+	}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	got := updated.(Model)
+	if !got.searching {
+		t.Fatal("searching should be true after pressing /")
+	}
+
+	updated, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("yuja")})
+	got = updated.(Model)
+	if got.searchQuery != "yuja" {
+		t.Fatalf("searchQuery = %q, want yuja", got.searchQuery)
+	}
+	if len(got.tracks) != 1 || got.tracks[0].ID != 1 {
+		t.Fatalf("filtered tracks = %+v, want only Yuja Wang track", got.tracks)
+	}
+	if got.selectedTrack() == nil || got.selectedTrack().ID != 1 {
+		t.Fatalf("selectedTrack() = %+v, want ID 1", got.selectedTrack())
+	}
+	if cmd == nil {
+		t.Fatal("expected rating reload command after search selection changed")
+	}
+
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got = updated.(Model)
+	if got.searching {
+		t.Fatal("searching should be false after pressing enter")
+	}
+	if !strings.Contains(got.statusLine(), "Filter /yuja (1/3)") {
+		t.Fatalf("statusLine() = %q, want active filter summary", got.statusLine())
+	}
+}
+
+func TestSearchEscClearsFilterAndRestoresTracks(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		searching:   true,
+		searchQuery: "yuja",
+		allTracks: []db.Track{
+			{ID: 2, TrackName: "Images", AlbumName: "Debussy", Artists: `["Seong-Jin Cho"]`, LastPlayedAt: 200},
+			{ID: 1, TrackName: "Etudes", AlbumName: "Ligeti", Artists: `["Yuja Wang"]`, LastPlayedAt: 100},
+		},
+		tracks: []db.Track{
+			{ID: 1, TrackName: "Etudes", AlbumName: "Ligeti", Artists: `["Yuja Wang"]`, LastPlayedAt: 100},
+		},
+		ratingKnown: true,
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := updated.(Model)
+	if got.searching {
+		t.Fatal("searching should be false after esc")
+	}
+	if got.searchQuery != "" {
+		t.Fatalf("searchQuery = %q, want cleared query", got.searchQuery)
+	}
+	if len(got.tracks) != 2 {
+		t.Fatalf("tracks len = %d, want restored full list", len(got.tracks))
+	}
+	if cmd != nil {
+		t.Fatal("rating should not reload when clearing search preserves the current selection")
+	}
+}
+
+func TestSearchNoMatchesView(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		width:       100,
+		height:      28,
+		searchQuery: "zzz",
+		allTracks: []db.Track{
+			{ID: 1, TrackName: "Etudes", AlbumName: "Ligeti", Artists: `["Yuja Wang"]`, LastPlayedAt: 100},
+		},
+		ratingKnown: true,
+	}
+
+	view := model.View()
+	if !strings.Contains(view, "No tracks match /zzz") {
+		t.Fatalf("View() = %q, want no-match message", view)
+	}
+	if !strings.Contains(view, "Filter /zzz (0/1)") {
+		t.Fatalf("View() = %q, want filter count in status line", view)
 	}
 }
 
@@ -397,6 +499,14 @@ func TestViewIncludesScrollableHint(t *testing.T) {
 	model := Model{
 		width:  80,
 		height: 16,
+		allTracks: []db.Track{
+			{ID: 1, TrackName: "One", Artists: `["A"]`, LastPlayedAt: 100},
+			{ID: 2, TrackName: "Two", Artists: `["B"]`, LastPlayedAt: 100},
+			{ID: 3, TrackName: "Three", Artists: `["C"]`, LastPlayedAt: 100},
+			{ID: 4, TrackName: "Four", Artists: `["D"]`, LastPlayedAt: 100},
+			{ID: 5, TrackName: "Five", Artists: `["E"]`, LastPlayedAt: 100},
+			{ID: 6, TrackName: "Six", Artists: `["F"]`, LastPlayedAt: 100},
+		},
 		tracks: []db.Track{
 			{ID: 1, TrackName: "One", Artists: `["A"]`, LastPlayedAt: 100},
 			{ID: 2, TrackName: "Two", Artists: `["B"]`, LastPlayedAt: 100},

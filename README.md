@@ -277,6 +277,7 @@ Current TUI features:
 
 - browse local tracks
 - switch track ordering between recent, ID, top-played, and unrated-first views
+- search tracks by title, artist, or album
 - sync from Spotify
 - edit ratings inline
 - adaptive layout based on terminal size
@@ -286,10 +287,19 @@ Main keys:
 
 - `j` / `k` or arrow keys: move
 - `o`: cycle sort order
+- `/`: search by title, artist, or album
+- `esc`: clear the active search filter
 - `s`: sync
 - `enter` or `e`: open rating editor
 - `r`: reload
 - `q`: quit
+
+Inside search mode:
+
+- type text: update the filter
+- `backspace`: delete
+- `enter`: keep the current filter and return to browsing
+- `esc`: clear the filter and return to browsing
 
 Inside the rating editor:
 

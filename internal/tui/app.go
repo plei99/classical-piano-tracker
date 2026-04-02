@@ -86,6 +86,9 @@ type Model struct {
 	loadingRating  bool
 	syncing        bool
 	savingRating   bool
+	searching      bool
+	searchQuery    string
+	allTracks      []db.Track
 	tracks         []db.Track
 	ratedTrackIDs  map[int64]struct{}
 	sortMode       sortMode
@@ -158,31 +161,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.err = nil
-		m.tracks = msg.tracks
+		m.allTracks = msg.tracks
 		m.ratedTrackIDs = msg.ratedTrackIDs
-		m.sortTracks()
-		if len(m.tracks) == 0 {
-			m.selectedIndex = 0
-			m.selectedRating = nil
-			m.ratingKnown = true
-			m.editingRating = false
-			return m, nil
-		}
-
-		if selectedTrackID != 0 {
-			if idx := indexOfTrackID(m.tracks, selectedTrackID); idx >= 0 {
-				m.selectedIndex = idx
-			}
-		}
-		if m.selectedIndex >= len(m.tracks) {
-			m.selectedIndex = len(m.tracks) - 1
-		}
-
-		m.loadingRating = true
-		m.selectedRating = nil
-		m.ratingKnown = false
-		m.editingRating = false
-		return m, m.loadRatingCmd(m.selectedTrack().ID)
+		return m, m.refreshTrackList(selectedTrackID)
 	case ratingLoadedMsg:
 		if m.selectedTrack() == nil || msg.trackID != m.selectedTrack().ID {
 			return m, nil
@@ -237,11 +218,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.ratedTrackIDs[msg.trackID] = struct{}{}
 			if m.sortMode == sortModeUnratedFirst {
-				selectedTrackID := msg.trackID
-				m.sortTracks()
-				if idx := indexOfTrackID(m.tracks, selectedTrackID); idx >= 0 {
-					m.selectedIndex = idx
-				}
+				_ = m.refreshTrackList(msg.trackID)
 			}
 		}
 		m.setStatus(fmt.Sprintf("Saved %d/5 rating for track %d", msg.rating.Stars, msg.trackID), false)
@@ -249,6 +226,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.editingRating {
 			return m.handleRatingEditorKey(msg)
+		}
+		if m.searching {
+			return m.handleSearchKey(msg)
 		}
 		return m.handleBrowsingKey(msg)
 	}
@@ -270,10 +250,19 @@ func (m Model) View() string {
 		)
 	}
 
-	if len(m.tracks) == 0 {
+	if len(m.allTracks) == 0 && len(m.tracks) == 0 {
 		return appStyle.Render(
 			titleStyle.Render("Classical Piano Tracker") + "\n\n" +
 				mutedStyle.Render("No local tracks found. Run `tracker sync` first.") + "\n\n" +
+				statusBarStyle.Render(m.statusLine()),
+		)
+	}
+
+	if len(m.tracks) == 0 {
+		return appStyle.Render(
+			titleStyle.Render("Classical Piano Tracker") + "\n" +
+				mutedStyle.Render("Local track history") + "\n\n" +
+				mutedStyle.Render(fmt.Sprintf("No tracks match /%s", strings.TrimSpace(m.searchQuery))) + "\n\n" +
 				statusBarStyle.Render(m.statusLine()),
 		)
 	}
@@ -350,7 +339,7 @@ func (m Model) layout() layout {
 func (m Model) renderList(width int, height int) string {
 	lines := []string{
 		titleStyle.Render("Tracks"),
-		mutedStyle.Render(fmt.Sprintf("%d loaded · sort: %s", len(m.tracks), m.sortModeLabel())),
+		mutedStyle.Render(m.trackListSummary()),
 		"",
 	}
 
@@ -471,9 +460,23 @@ func (m Model) handleBrowsingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.tracks) == 0 || m.syncing || m.savingRating {
 			return m, nil
 		}
+		m.clearStatus()
 		m.cycleSortMode()
+		return m, nil
+	case "/":
+		if m.syncing || m.savingRating {
+			return m, nil
+		}
+		m.searching = true
 		m.clearStatus()
 		return m, nil
+	case "esc":
+		if strings.TrimSpace(m.searchQuery) == "" || m.syncing || m.savingRating {
+			return m, nil
+		}
+		m.searchQuery = ""
+		m.clearStatus()
+		return m, m.refreshTrackList(m.selectedTrackID())
 	case "e", "enter":
 		if m.selectedTrack() == nil || m.loadingRating || m.savingRating {
 			return m, nil
@@ -500,6 +503,47 @@ func (m Model) handleBrowsingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ratingKnown = false
 		m.clearStatus()
 		return m, m.loadRatingCmd(m.selectedTrack().ID)
+	}
+
+	return m, nil
+}
+
+func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "enter":
+		m.searching = false
+		m.clearStatus()
+		return m, nil
+	case "esc":
+		m.searching = false
+		m.searchQuery = ""
+		m.clearStatus()
+		return m, m.refreshTrackList(m.selectedTrackID())
+	case "backspace":
+		if m.searchQuery != "" {
+			_, size := utf8.DecodeLastRuneInString(m.searchQuery)
+			m.searchQuery = m.searchQuery[:len(m.searchQuery)-size]
+		}
+		m.clearStatus()
+		return m, m.refreshTrackList(m.selectedTrackID())
+	case "ctrl+u":
+		m.searchQuery = ""
+		m.clearStatus()
+		return m, m.refreshTrackList(m.selectedTrackID())
+	}
+
+	if msg.Type == tea.KeySpace {
+		m.searchQuery += " "
+		m.clearStatus()
+		return m, m.refreshTrackList(m.selectedTrackID())
+	}
+
+	if msg.Type == tea.KeyRunes {
+		m.searchQuery += string(msg.Runes)
+		m.clearStatus()
+		return m, m.refreshTrackList(m.selectedTrackID())
 	}
 
 	return m, nil
@@ -563,6 +607,14 @@ func (m Model) selectedTrack() *db.Track {
 	}
 
 	return &m.tracks[m.selectedIndex]
+}
+
+func (m Model) selectedTrackID() int64 {
+	if track := m.selectedTrack(); track != nil {
+		return track.ID
+	}
+
+	return 0
 }
 
 func (m Model) loadTracksCmd() tea.Cmd {
@@ -650,6 +702,9 @@ func (m Model) statusLine() string {
 	if m.editingRating {
 		base = "1-5: stars   type: opinion   backspace: delete   enter: save   esc: cancel"
 	}
+	if m.searching {
+		base = "type: search   backspace: delete   enter: apply   esc: clear"
+	}
 
 	prefix := ""
 	switch {
@@ -663,6 +718,10 @@ func (m Model) statusLine() string {
 		} else {
 			prefix = m.statusMessage
 		}
+	case m.searching:
+		prefix = fmt.Sprintf("Search /%s_ (%d/%d)", m.searchQuery, len(m.tracks), m.totalTrackCount())
+	case strings.TrimSpace(m.searchQuery) != "":
+		prefix = fmt.Sprintf("Filter /%s (%d/%d)", strings.TrimSpace(m.searchQuery), len(m.tracks), m.totalTrackCount())
 	}
 
 	if prefix == "" {
@@ -711,26 +770,82 @@ func (m *Model) cycleSortMode() {
 		m.sortMode = sortModeCycle[(currentIndex+1)%len(sortModeCycle)]
 	}
 
-	m.sortTracks()
-	if selectedTrackID != 0 {
-		if idx := indexOfTrackID(m.tracks, selectedTrackID); idx >= 0 {
-			m.selectedIndex = idx
-		}
-	}
+	_ = m.refreshTrackList(selectedTrackID)
 }
 
 func (m *Model) sortTracks() {
 	switch m.sortMode {
 	case sortModeIDAsc:
-		sortTracksByIDAsc(m.tracks)
+		sortTracksByIDAsc(m.allTracks)
 	case sortModeTopPlayed:
-		sortTracksByTopPlayed(m.tracks)
+		sortTracksByTopPlayed(m.allTracks)
 	case sortModeUnratedFirst:
-		sortTracksByUnratedFirst(m.tracks, m.ratedTrackIDs)
+		sortTracksByUnratedFirst(m.allTracks, m.ratedTrackIDs)
 	default:
 		m.sortMode = sortModeRecentDesc
-		sortTracksByRecentDesc(m.tracks)
+		sortTracksByRecentDesc(m.allTracks)
 	}
+}
+
+func (m *Model) refreshTrackList(selectedTrackID int64) tea.Cmd {
+	if len(m.allTracks) == 0 && len(m.tracks) > 0 {
+		m.allTracks = append([]db.Track(nil), m.tracks...)
+	}
+
+	m.sortTracks()
+	m.tracks = filterTracks(m.allTracks, m.searchQuery)
+	if len(m.tracks) == 0 {
+		m.selectedIndex = 0
+		m.selectedRating = nil
+		m.loadingRating = false
+		m.ratingKnown = true
+		m.editingRating = false
+		return nil
+	}
+
+	if idx := indexOfTrackID(m.tracks, selectedTrackID); idx >= 0 {
+		m.selectedIndex = idx
+	} else {
+		m.selectedIndex = 0
+		m.selectedRating = nil
+		m.loadingRating = true
+		m.ratingKnown = false
+		m.editingRating = false
+		return m.loadRatingCmd(m.selectedTrack().ID)
+	}
+
+	if !m.ratingKnown {
+		m.selectedRating = nil
+		m.loadingRating = true
+		m.editingRating = false
+		return m.loadRatingCmd(m.selectedTrack().ID)
+	}
+
+	if m.selectedRating != nil && m.selectedRating.TrackID != m.selectedTrack().ID {
+		m.selectedRating = nil
+		m.loadingRating = true
+		m.ratingKnown = false
+		m.editingRating = false
+		return m.loadRatingCmd(m.selectedTrack().ID)
+	}
+
+	return nil
+}
+
+func (m Model) trackListSummary() string {
+	if strings.TrimSpace(m.searchQuery) == "" {
+		return fmt.Sprintf("%d loaded · sort: %s", len(m.tracks), m.sortModeLabel())
+	}
+
+	return fmt.Sprintf("%d/%d shown · sort: %s", len(m.tracks), m.totalTrackCount(), m.sortModeLabel())
+}
+
+func (m Model) totalTrackCount() int {
+	if len(m.allTracks) > 0 {
+		return len(m.allTracks)
+	}
+
+	return len(m.tracks)
 }
 
 func (m Model) sortModeLabel() string {
@@ -790,6 +905,28 @@ func sortTracksByUnratedFirst(tracks []db.Track, ratedTrackIDs map[int64]struct{
 		}
 		return cmp.Compare(right.ID, left.ID)
 	})
+}
+
+func filterTracks(tracks []db.Track, query string) []db.Track {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return append([]db.Track(nil), tracks...)
+	}
+
+	matches := make([]db.Track, 0, len(tracks))
+	for _, track := range tracks {
+		if trackMatchesSearchQuery(track, query) {
+			matches = append(matches, track)
+		}
+	}
+
+	return matches
+}
+
+func trackMatchesSearchQuery(track db.Track, query string) bool {
+	return strings.Contains(strings.ToLower(track.TrackName), query) ||
+		strings.Contains(strings.ToLower(formatTrackArtists(track.Artists)), query) ||
+		strings.Contains(strings.ToLower(track.AlbumName), query)
 }
 
 func indexOfTrackID(tracks []db.Track, trackID int64) int {

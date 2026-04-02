@@ -276,6 +276,7 @@ go run ./cmd/tracker tui
 Current TUI features:
 
 - browse local tracks
+- switch track ordering between recent, ID, top-played, and unrated-first views
 - sync from Spotify
 - edit ratings inline
 - adaptive layout based on terminal size
@@ -284,6 +285,7 @@ Current TUI features:
 Main keys:
 
 - `j` / `k` or arrow keys: move
+- `o`: cycle sort order
 - `s`: sync
 - `enter` or `e`: open rating editor
 - `r`: reload

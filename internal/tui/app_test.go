@@ -177,6 +177,64 @@ func TestSyncFinishedErrorSetsStatus(t *testing.T) {
 	}
 }
 
+func TestSortKeyCyclesOrderAndPreservesSelectedTrack(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		tracks: []db.Track{
+			{ID: 10, LastPlayedAt: 300, PlayCount: 2},
+			{ID: 7, LastPlayedAt: 200, PlayCount: 8},
+			{ID: 4, LastPlayedAt: 100, PlayCount: 1},
+		},
+		sortMode:      sortModeRecentDesc,
+		selectedIndex: 1,
+		ratingKnown:   true,
+	}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	got := updated.(Model)
+	if got.sortMode != sortModeIDAsc {
+		t.Fatalf("sortMode = %v, want sortModeIDAsc", got.sortMode)
+	}
+	if got.selectedTrack() == nil || got.selectedTrack().ID != 7 {
+		t.Fatalf("selectedTrack() = %+v, want ID 7", got.selectedTrack())
+	}
+	if got.tracks[0].ID != 4 || got.tracks[1].ID != 7 || got.tracks[2].ID != 10 {
+		t.Fatalf("tracks after ID sort = %+v, want IDs 4,7,10", got.tracks)
+	}
+}
+
+func TestRatingSavedResortsUnratedFirst(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		tracks: []db.Track{
+			{ID: 4, LastPlayedAt: 300},
+			{ID: 9, LastPlayedAt: 200},
+		},
+		ratedTrackIDs:  map[int64]struct{}{9: {}},
+		sortMode:       sortModeUnratedFirst,
+		selectedIndex:  0,
+		ratingKnown:    true,
+		selectedRating: nil,
+	}
+
+	updated, _ := model.Update(ratingSavedMsg{
+		trackID: 4,
+		rating:  &db.Rating{TrackID: 4, Stars: 5, UpdatedAt: 10},
+	})
+	got := updated.(Model)
+	if _, ok := got.ratedTrackIDs[4]; !ok {
+		t.Fatal("track 4 should be marked as rated after save")
+	}
+	if got.selectedTrack() == nil || got.selectedTrack().ID != 4 {
+		t.Fatalf("selectedTrack() = %+v, want track 4", got.selectedTrack())
+	}
+	if got.tracks[0].ID != 4 || got.tracks[1].ID != 9 {
+		t.Fatalf("tracks after unrated-first resort = %+v, want selected track preserved with deterministic order", got.tracks)
+	}
+}
+
 func TestEnterStartsRatingEditorWithExistingRating(t *testing.T) {
 	t.Parallel()
 
@@ -353,6 +411,9 @@ func TestViewIncludesScrollableHint(t *testing.T) {
 	view := model.View()
 	if !strings.Contains(view, "Local track history") {
 		t.Fatalf("View() = %q, want main header", view)
+	}
+	if !strings.Contains(view, "sort: recent") {
+		t.Fatalf("View() = %q, want sort indicator", view)
 	}
 }
 

@@ -59,6 +59,22 @@ type SyncFunc func(context.Context) (syncer.Stats, error)
 
 type SaveRatingFunc func(context.Context, db.UpsertRatingParams) (db.Rating, error)
 
+type sortMode int
+
+const (
+	sortModeRecentDesc sortMode = iota
+	sortModeIDAsc
+	sortModeTopPlayed
+	sortModeUnratedFirst
+)
+
+var sortModeCycle = []sortMode{
+	sortModeRecentDesc,
+	sortModeIDAsc,
+	sortModeTopPlayed,
+	sortModeUnratedFirst,
+}
+
 // Model is the root Bubble Tea model for the tracker TUI.
 type Model struct {
 	queries        *db.Queries
@@ -71,6 +87,8 @@ type Model struct {
 	syncing        bool
 	savingRating   bool
 	tracks         []db.Track
+	ratedTrackIDs  map[int64]struct{}
+	sortMode       sortMode
 	selectedIndex  int
 	selectedRating *db.Rating
 	ratingKnown    bool
@@ -83,8 +101,9 @@ type Model struct {
 }
 
 type tracksLoadedMsg struct {
-	tracks []db.Track
-	err    error
+	tracks        []db.Track
+	ratedTrackIDs map[int64]struct{}
+	err           error
 }
 
 type ratingLoadedMsg struct {
@@ -140,7 +159,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.err = nil
 		m.tracks = msg.tracks
-		sortTracksByRecentDesc(m.tracks)
+		m.ratedTrackIDs = msg.ratedTrackIDs
+		m.sortTracks()
 		if len(m.tracks) == 0 {
 			m.selectedIndex = 0
 			m.selectedRating = nil
@@ -210,6 +230,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedRating = msg.rating
 			m.ratingKnown = true
 			m.loadingRating = false
+		}
+		if msg.rating != nil {
+			if m.ratedTrackIDs == nil {
+				m.ratedTrackIDs = map[int64]struct{}{}
+			}
+			m.ratedTrackIDs[msg.trackID] = struct{}{}
+			if m.sortMode == sortModeUnratedFirst {
+				selectedTrackID := msg.trackID
+				m.sortTracks()
+				if idx := indexOfTrackID(m.tracks, selectedTrackID); idx >= 0 {
+					m.selectedIndex = idx
+				}
+			}
 		}
 		m.setStatus(fmt.Sprintf("Saved %d/5 rating for track %d", msg.rating.Stars, msg.trackID), false)
 		return m, nil
@@ -317,7 +350,7 @@ func (m Model) layout() layout {
 func (m Model) renderList(width int, height int) string {
 	lines := []string{
 		titleStyle.Render("Tracks"),
-		mutedStyle.Render(fmt.Sprintf("%d loaded", len(m.tracks))),
+		mutedStyle.Render(fmt.Sprintf("%d loaded · sort: %s", len(m.tracks), m.sortModeLabel())),
 		"",
 	}
 
@@ -434,6 +467,13 @@ func (m Model) handleBrowsingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.syncing = true
 		m.clearStatus()
 		return m, m.syncCmd()
+	case "o":
+		if len(m.tracks) == 0 || m.syncing || m.savingRating {
+			return m, nil
+		}
+		m.cycleSortMode()
+		m.clearStatus()
+		return m, nil
 	case "e", "enter":
 		if m.selectedTrack() == nil || m.loadingRating || m.savingRating {
 			return m, nil
@@ -528,7 +568,21 @@ func (m Model) selectedTrack() *db.Track {
 func (m Model) loadTracksCmd() tea.Cmd {
 	return func() tea.Msg {
 		tracks, err := m.queries.ListAllTracks(context.Background())
-		return tracksLoadedMsg{tracks: tracks, err: err}
+		if err != nil {
+			return tracksLoadedMsg{err: err}
+		}
+
+		ratings, err := m.queries.ListAllRatings(context.Background())
+		if err != nil {
+			return tracksLoadedMsg{err: err}
+		}
+
+		ratedTrackIDs := make(map[int64]struct{}, len(ratings))
+		for _, rating := range ratings {
+			ratedTrackIDs[rating.TrackID] = struct{}{}
+		}
+
+		return tracksLoadedMsg{tracks: tracks, ratedTrackIDs: ratedTrackIDs}
 	}
 }
 
@@ -592,7 +646,7 @@ func (m *Model) clearStatus() {
 }
 
 func (m Model) statusLine() string {
-	base := "j/k or arrows: move   s: sync   enter/e: rate   r: reload   q: quit"
+	base := "j/k or arrows: move   o: sort   s: sync   enter/e: rate   r: reload   q: quit"
 	if m.editingRating {
 		base = "1-5: stars   type: opinion   backspace: delete   enter: save   esc: cancel"
 	}
@@ -640,8 +694,97 @@ func formatTrackArtists(raw string) string {
 	return strings.Join(artists, ", ")
 }
 
+func (m *Model) cycleSortMode() {
+	if len(sortModeCycle) == 0 {
+		return
+	}
+
+	selectedTrackID := int64(0)
+	if track := m.selectedTrack(); track != nil {
+		selectedTrackID = track.ID
+	}
+
+	currentIndex := slices.Index(sortModeCycle, m.sortMode)
+	if currentIndex < 0 {
+		m.sortMode = sortModeCycle[0]
+	} else {
+		m.sortMode = sortModeCycle[(currentIndex+1)%len(sortModeCycle)]
+	}
+
+	m.sortTracks()
+	if selectedTrackID != 0 {
+		if idx := indexOfTrackID(m.tracks, selectedTrackID); idx >= 0 {
+			m.selectedIndex = idx
+		}
+	}
+}
+
+func (m *Model) sortTracks() {
+	switch m.sortMode {
+	case sortModeIDAsc:
+		sortTracksByIDAsc(m.tracks)
+	case sortModeTopPlayed:
+		sortTracksByTopPlayed(m.tracks)
+	case sortModeUnratedFirst:
+		sortTracksByUnratedFirst(m.tracks, m.ratedTrackIDs)
+	default:
+		m.sortMode = sortModeRecentDesc
+		sortTracksByRecentDesc(m.tracks)
+	}
+}
+
+func (m Model) sortModeLabel() string {
+	switch m.sortMode {
+	case sortModeRecentDesc:
+		return "recent"
+	case sortModeIDAsc:
+		return "id"
+	case sortModeTopPlayed:
+		return "top played"
+	case sortModeUnratedFirst:
+		return "unrated first"
+	default:
+		return "recent"
+	}
+}
+
 func sortTracksByRecentDesc(tracks []db.Track) {
 	slices.SortFunc(tracks, func(left db.Track, right db.Track) int {
+		if byPlayedAt := cmp.Compare(right.LastPlayedAt, left.LastPlayedAt); byPlayedAt != 0 {
+			return byPlayedAt
+		}
+		return cmp.Compare(right.ID, left.ID)
+	})
+}
+
+func sortTracksByIDAsc(tracks []db.Track) {
+	slices.SortFunc(tracks, func(left db.Track, right db.Track) int {
+		return cmp.Compare(left.ID, right.ID)
+	})
+}
+
+func sortTracksByTopPlayed(tracks []db.Track) {
+	slices.SortFunc(tracks, func(left db.Track, right db.Track) int {
+		if byPlayCount := cmp.Compare(right.PlayCount, left.PlayCount); byPlayCount != 0 {
+			return byPlayCount
+		}
+		if byPlayedAt := cmp.Compare(right.LastPlayedAt, left.LastPlayedAt); byPlayedAt != 0 {
+			return byPlayedAt
+		}
+		return cmp.Compare(right.ID, left.ID)
+	})
+}
+
+func sortTracksByUnratedFirst(tracks []db.Track, ratedTrackIDs map[int64]struct{}) {
+	slices.SortFunc(tracks, func(left db.Track, right db.Track) int {
+		_, leftRated := ratedTrackIDs[left.ID]
+		_, rightRated := ratedTrackIDs[right.ID]
+		if leftRated != rightRated {
+			if leftRated {
+				return 1
+			}
+			return -1
+		}
 		if byPlayedAt := cmp.Compare(right.LastPlayedAt, left.LastPlayedAt); byPlayedAt != 0 {
 			return byPlayedAt
 		}

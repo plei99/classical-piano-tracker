@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/plei99/classical-piano-tracker/internal/llm"
 )
@@ -63,5 +64,25 @@ func TestOpenAIProviderUsesStructuredRequestAndParsesResponseText(t *testing.T) 
 	}
 	if format["type"] != "json_schema" {
 		t.Fatalf("format.type = %#v, want json_schema", format["type"])
+	}
+}
+
+func TestNewOpenAIUsesLongerDefaultTimeout(t *testing.T) {
+	t.Parallel()
+
+	provider, err := NewOpenAI("test-key", "gpt-5.4", "https://api.openai.com/v1/responses", nil)
+	if err != nil {
+		t.Fatalf("NewOpenAI() error = %v", err)
+	}
+
+	openAI, ok := provider.(*openAIProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *openAIProvider", provider)
+	}
+	if openAI.httpClient.Timeout != defaultOpenAITimeout {
+		t.Fatalf("httpClient.Timeout = %v, want %v", openAI.httpClient.Timeout, defaultOpenAITimeout)
+	}
+	if openAI.httpClient.Timeout <= 30*time.Second {
+		t.Fatalf("httpClient.Timeout = %v, want more than 30s", openAI.httpClient.Timeout)
 	}
 }

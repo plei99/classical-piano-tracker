@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/plei99/classical-piano-tracker/internal/llm"
 )
@@ -78,5 +79,25 @@ func TestAnthropicProviderUsesToolSchemaAndParsesToolInput(t *testing.T) {
 	content, ok := message["content"].([]any)
 	if !ok || len(content) != 1 {
 		t.Fatalf("content = %#v, want one text block", message["content"])
+	}
+}
+
+func TestNewAnthropicUsesLongerDefaultTimeout(t *testing.T) {
+	t.Parallel()
+
+	provider, err := NewAnthropic("test-key", "claude-sonnet-4-5", "https://api.anthropic.com/v1/messages", nil)
+	if err != nil {
+		t.Fatalf("NewAnthropic() error = %v", err)
+	}
+
+	anthropic, ok := provider.(*anthropicProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *anthropicProvider", provider)
+	}
+	if anthropic.httpClient.Timeout != defaultAnthropicTimeout {
+		t.Fatalf("httpClient.Timeout = %v, want %v", anthropic.httpClient.Timeout, defaultAnthropicTimeout)
+	}
+	if anthropic.httpClient.Timeout <= 30*time.Second {
+		t.Fatalf("httpClient.Timeout = %v, want more than 30s", anthropic.httpClient.Timeout)
 	}
 }

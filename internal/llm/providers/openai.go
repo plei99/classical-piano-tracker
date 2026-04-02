@@ -19,6 +19,7 @@ import (
 const (
 	defaultOpenAIBaseURL = "https://api.openai.com/v1/responses"
 	defaultOpenAIModel   = "gpt-5.4"
+	defaultOpenAITimeout = 90 * time.Second
 )
 
 type openAIProvider struct {
@@ -81,7 +82,7 @@ func NewOpenAI(apiKey string, model string, baseURL string, httpClient *http.Cli
 		baseURL = defaultOpenAIBaseURL
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = &http.Client{Timeout: defaultOpenAITimeout}
 	}
 
 	return &openAIProvider{

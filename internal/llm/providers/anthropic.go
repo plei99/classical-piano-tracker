@@ -17,6 +17,7 @@ import (
 const (
 	defaultAnthropicBaseURL = "https://api.anthropic.com/v1/messages"
 	defaultAnthropicModel   = "claude-sonnet-4-5"
+	defaultAnthropicTimeout = 90 * time.Second
 	anthropicVersion        = "2023-06-01"
 	anthropicToolName       = "emit_recommendations"
 )
@@ -50,7 +51,7 @@ func NewAnthropic(apiKey string, model string, baseURL string, httpClient *http.
 		baseURL = defaultAnthropicBaseURL
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = &http.Client{Timeout: defaultAnthropicTimeout}
 	}
 
 	return &anthropicProvider{

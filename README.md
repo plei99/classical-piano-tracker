@@ -66,6 +66,14 @@ By default, `make install` copies the binary to:
 ~/.local/bin/tracker
 ```
 
+On macOS, `make install` also installs and starts a per-user LaunchAgent that
+runs `tracker sync` once per hour and at login. Logs go to:
+
+```text
+~/Library/Logs/piano-tracker/sync.out.log
+~/Library/Logs/piano-tracker/sync.err.log
+```
+
 Override that location if you want:
 
 ```bash

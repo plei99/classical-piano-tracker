@@ -306,12 +306,21 @@ func (m Model) layout() layout {
 	}
 
 	availableWidth := max(40, width-appStyle.GetHorizontalFrameSize())
-	availableHeight := max(18, height-appStyle.GetVerticalFrameSize()-4)
+	footerHeight := lipgloss.Height(m.footerView())
+	headerHeight := 4
+	bodyHeight := max(
+		0,
+		height-appStyle.GetVerticalFrameSize()-headerHeight-footerHeight,
+	)
 
 	if availableWidth < verticalLayoutWidthCut {
 		paneWidth := max(30, availableWidth-detailPaneStyle.GetHorizontalFrameSize())
-		listHeight := max(minPaneContentHeight, availableHeight/2-1)
-		detailHeight := max(minPaneContentHeight, availableHeight-listHeight-1)
+		listFrameHeight := listPaneStyle.GetVerticalFrameSize()
+		detailFrameHeight := detailPaneStyle.GetVerticalFrameSize()
+		usableListHeight := max(0, bodyHeight/2-listFrameHeight)
+		usableDetailHeight := max(0, bodyHeight-bodyHeight/2-detailFrameHeight)
+		listHeight := clampPaneHeight(usableListHeight, usableListHeight)
+		detailHeight := clampPaneHeight(usableDetailHeight, usableDetailHeight)
 
 		return layout{
 			vertical:     true,
@@ -325,8 +334,14 @@ func (m Model) layout() layout {
 	listWidth := min(44, availableWidth/2)
 	detailWidth := max(34, availableWidth-listWidth-1-detailPaneStyle.GetHorizontalFrameSize())
 	listWidth = max(28, listWidth-listPaneStyle.GetHorizontalFrameSize())
-	listHeight := max(minPaneContentHeight, availableHeight)
-	detailHeight := max(minPaneContentHeight, availableHeight)
+	listHeight := clampPaneHeight(
+		bodyHeight-listPaneStyle.GetVerticalFrameSize(),
+		bodyHeight-listPaneStyle.GetVerticalFrameSize(),
+	)
+	detailHeight := clampPaneHeight(
+		bodyHeight-detailPaneStyle.GetVerticalFrameSize(),
+		bodyHeight-detailPaneStyle.GetVerticalFrameSize(),
+	)
 
 	return layout{
 		listWidth:    listWidth,
@@ -334,6 +349,16 @@ func (m Model) layout() layout {
 		listHeight:   listHeight,
 		detailHeight: detailHeight,
 	}
+}
+
+func clampPaneHeight(height int, availableHeight int) int {
+	if availableHeight <= 0 {
+		return 0
+	}
+	if availableHeight < minPaneContentHeight {
+		return availableHeight
+	}
+	return max(minPaneContentHeight, height)
 }
 
 func (m Model) renderList(width int, height int) string {

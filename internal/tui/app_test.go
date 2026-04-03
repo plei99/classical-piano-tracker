@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/plei99/classical-piano-tracker/internal/db"
 	"github.com/plei99/classical-piano-tracker/internal/syncer"
 )
@@ -580,6 +581,33 @@ func TestViewShowsRatingEditor(t *testing.T) {
 	}
 	if !strings.Contains(view, "Stars: 5/5") {
 		t.Fatalf("View() = %q, want draft stars", view)
+	}
+}
+
+func TestViewFitsSmallWindowWithStatusFooter(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		width:  92,
+		height: 30,
+		tracks: []db.Track{
+			{
+				ID:           49,
+				SpotifyID:    "4WlRUx1NuFSR1Oc7ksBBIm",
+				TrackName:    "Transcendental Etudes, S. 139: No. 4, Mazeppa - Live",
+				Artists:      `["Franz Liszt","Yunchan Lim"]`,
+				AlbumName:    "Live from The Cliburn - Liszt: Transcendental Etudes",
+				PlayCount:    1,
+				LastPlayedAt: 1780000000000000000,
+			},
+		},
+		ratingKnown:   true,
+		statusMessage: "Sync complete. fetched=10 accepted=10 inserted=0 updated=10",
+	}
+
+	view := model.View()
+	if got := lipgloss.Height(view); got > model.height {
+		t.Fatalf("View() height = %d, want <= %d", got, model.height)
 	}
 }
 

@@ -204,6 +204,40 @@ func TestSortKeyCyclesOrderAndPreservesSelectedTrack(t *testing.T) {
 	}
 }
 
+func TestGoToTopAndBottomKeysMoveSelection(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		tracks: []db.Track{
+			{ID: 11},
+			{ID: 22},
+			{ID: 33},
+		},
+		selectedIndex: 1,
+		ratingKnown:   true,
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	got := updated.(Model)
+	if got.selectedIndex != 0 || got.selectedTrack() == nil || got.selectedTrack().ID != 11 {
+		t.Fatalf("after g selectedIndex=%d selectedTrack=%+v, want first track", got.selectedIndex, got.selectedTrack())
+	}
+	if !got.loadingRating || cmd == nil {
+		t.Fatal("g should trigger rating load for the first track")
+	}
+
+	got.loadingRating = false
+	got.ratingKnown = true
+	updated, cmd = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	got = updated.(Model)
+	if got.selectedIndex != 2 || got.selectedTrack() == nil || got.selectedTrack().ID != 33 {
+		t.Fatalf("after G selectedIndex=%d selectedTrack=%+v, want last track", got.selectedIndex, got.selectedTrack())
+	}
+	if !got.loadingRating || cmd == nil {
+		t.Fatal("G should trigger rating load for the last track")
+	}
+}
+
 func TestSearchFiltersTracksAndEnterExitsSearchMode(t *testing.T) {
 	t.Parallel()
 

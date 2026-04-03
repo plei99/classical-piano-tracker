@@ -487,22 +487,22 @@ func (m Model) handleBrowsingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.tracks) == 0 || m.selectedIndex == 0 || m.syncing || m.savingRating {
 			return m, nil
 		}
-		m.selectedIndex--
-		m.loadingRating = true
-		m.selectedRating = nil
-		m.ratingKnown = false
-		m.clearStatus()
-		return m, m.loadRatingCmd(m.selectedTrack().ID)
+		return m.moveSelectionTo(0 + m.selectedIndex - 1)
 	case "down", "j":
 		if len(m.tracks) == 0 || m.selectedIndex >= len(m.tracks)-1 || m.syncing || m.savingRating {
 			return m, nil
 		}
-		m.selectedIndex++
-		m.loadingRating = true
-		m.selectedRating = nil
-		m.ratingKnown = false
-		m.clearStatus()
-		return m, m.loadRatingCmd(m.selectedTrack().ID)
+		return m.moveSelectionTo(m.selectedIndex + 1)
+	case "g", "home":
+		if len(m.tracks) == 0 || m.selectedIndex == 0 || m.syncing || m.savingRating {
+			return m, nil
+		}
+		return m.moveSelectionTo(0)
+	case "G", "end":
+		if len(m.tracks) == 0 || m.selectedIndex >= len(m.tracks)-1 || m.syncing || m.savingRating {
+			return m, nil
+		}
+		return m.moveSelectionTo(len(m.tracks) - 1)
 	}
 
 	return m, nil
@@ -617,6 +617,29 @@ func (m Model) selectedTrackID() int64 {
 	return 0
 }
 
+func (m Model) moveSelectionTo(index int) (tea.Model, tea.Cmd) {
+	if len(m.tracks) == 0 {
+		return m, nil
+	}
+
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(m.tracks) {
+		index = len(m.tracks) - 1
+	}
+	if index == m.selectedIndex {
+		return m, nil
+	}
+
+	m.selectedIndex = index
+	m.loadingRating = true
+	m.selectedRating = nil
+	m.ratingKnown = false
+	m.clearStatus()
+	return m, m.loadRatingCmd(m.selectedTrack().ID)
+}
+
 func (m Model) loadTracksCmd() tea.Cmd {
 	return func() tea.Msg {
 		tracks, err := m.queries.ListAllTracks(context.Background())
@@ -698,7 +721,7 @@ func (m *Model) clearStatus() {
 }
 
 func (m Model) statusLine() string {
-	base := "j/k or arrows: move   o: sort   s: sync   enter/e: rate   r: reload   q: quit"
+	base := "j/k or arrows: move   g/G: top/bottom   o: sort   s: sync   enter/e: rate   r: reload   q: quit"
 	if m.editingRating {
 		base = "1-5: stars   type: opinion   backspace: delete   enter: save   esc: cancel"
 	}

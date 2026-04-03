@@ -286,6 +286,7 @@ Current TUI features:
 Main keys:
 
 - `j` / `k` or arrow keys: move
+- `g` / `G` or `home` / `end`: jump to top / bottom
 - `o`: cycle sort order
 - `/`: search by title, artist, or album
 - `esc`: clear the active search filter

@@ -254,7 +254,7 @@ func (m Model) View() string {
 		return appStyle.Render(
 			titleStyle.Render("Classical Piano Tracker") + "\n\n" +
 				mutedStyle.Render("No local tracks found. Run `tracker sync` first.") + "\n\n" +
-				statusBarStyle.Render(m.statusLine()),
+				m.footerView(),
 		)
 	}
 
@@ -263,7 +263,7 @@ func (m Model) View() string {
 			titleStyle.Render("Classical Piano Tracker") + "\n" +
 				mutedStyle.Render("Local track history") + "\n\n" +
 				mutedStyle.Render(fmt.Sprintf("No tracks match /%s", strings.TrimSpace(m.searchQuery))) + "\n\n" +
-				statusBarStyle.Render(m.statusLine()),
+				m.footerView(),
 		)
 	}
 
@@ -282,7 +282,7 @@ func (m Model) View() string {
 		titleStyle.Render("Classical Piano Tracker") + "\n" +
 			mutedStyle.Render("Local track history") + "\n\n" +
 			body + "\n\n" +
-			statusBarStyle.Render(m.statusLine()),
+			m.footerView(),
 	)
 }
 
@@ -720,7 +720,7 @@ func (m *Model) clearStatus() {
 	m.statusIsError = false
 }
 
-func (m Model) statusLine() string {
+func (m Model) footerView() string {
 	base := "j/k or arrows: move   g/G: top/bottom   o: sort   s: sync   enter/e: rate   r: reload   q: quit"
 	if m.editingRating {
 		base = "1-5: stars   type: opinion   backspace: delete   enter: save   esc: cancel"
@@ -729,28 +729,26 @@ func (m Model) statusLine() string {
 		base = "type: search   backspace: delete   enter: apply   esc: clear"
 	}
 
-	prefix := ""
+	var lines []string
 	switch {
 	case m.syncing:
-		prefix = "Syncing with Spotify..."
+		lines = append(lines, "Syncing with Spotify...")
 	case m.savingRating:
-		prefix = "Saving rating..."
+		lines = append(lines, "Saving rating...")
 	case m.statusMessage != "":
 		if m.statusIsError {
-			prefix = "Error: " + m.statusMessage
+			lines = append(lines, "Error: "+m.statusMessage)
 		} else {
-			prefix = m.statusMessage
+			lines = append(lines, m.statusMessage)
 		}
 	case m.searching:
-		prefix = fmt.Sprintf("Search /%s_ (%d/%d)", m.searchQuery, len(m.tracks), m.totalTrackCount())
+		lines = append(lines, fmt.Sprintf("Search /%s_ (%d/%d)", m.searchQuery, len(m.tracks), m.totalTrackCount()))
 	case strings.TrimSpace(m.searchQuery) != "":
-		prefix = fmt.Sprintf("Filter /%s (%d/%d)", strings.TrimSpace(m.searchQuery), len(m.tracks), m.totalTrackCount())
+		lines = append(lines, fmt.Sprintf("Filter /%s (%d/%d)", strings.TrimSpace(m.searchQuery), len(m.tracks), m.totalTrackCount()))
 	}
 
-	if prefix == "" {
-		return base
-	}
-	return prefix + "   " + base
+	lines = append(lines, base)
+	return statusBarStyle.Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) ratingDraftStarsLabel() string {

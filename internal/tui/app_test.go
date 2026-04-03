@@ -147,8 +147,8 @@ func TestSyncFinishedReloadsTracks(t *testing.T) {
 	if !got.loadingTracks {
 		t.Fatal("loadingTracks should be true while refreshing after sync")
 	}
-	if !strings.Contains(got.statusLine(), "Sync complete.") {
-		t.Fatalf("statusLine() = %q, want sync completion", got.statusLine())
+	if !footerHasNotificationLine(got.footerView(), "Sync complete.") {
+		t.Fatalf("footerView() = %q, want sync completion on a separate line", got.footerView())
 	}
 	if cmd == nil {
 		t.Fatal("expected track reload command after successful sync")
@@ -172,8 +172,8 @@ func TestSyncFinishedErrorSetsStatus(t *testing.T) {
 	if !got.statusIsError {
 		t.Fatal("status should be marked as error after failed sync")
 	}
-	if !strings.Contains(got.statusLine(), "Sync failed: bad token") {
-		t.Fatalf("statusLine() = %q, want sync error text", got.statusLine())
+	if !footerHasNotificationLine(got.footerView(), "Error: Sync failed: bad token") {
+		t.Fatalf("footerView() = %q, want sync error on a separate line", got.footerView())
 	}
 }
 
@@ -281,8 +281,8 @@ func TestSearchFiltersTracksAndEnterExitsSearchMode(t *testing.T) {
 	if got.searching {
 		t.Fatal("searching should be false after pressing enter")
 	}
-	if !strings.Contains(got.statusLine(), "Filter /yuja (1/3)") {
-		t.Fatalf("statusLine() = %q, want active filter summary", got.statusLine())
+	if !footerHasNotificationLine(got.footerView(), "Filter /yuja (1/3)") {
+		t.Fatalf("footerView() = %q, want active filter summary on a separate line", got.footerView())
 	}
 }
 
@@ -335,7 +335,7 @@ func TestSearchNoMatchesView(t *testing.T) {
 	if !strings.Contains(view, "No tracks match /zzz") {
 		t.Fatalf("View() = %q, want no-match message", view)
 	}
-	if !strings.Contains(view, "Filter /zzz (0/1)") {
+	if !footerHasNotificationLine(view, "Filter /zzz (0/1)") {
 		t.Fatalf("View() = %q, want filter count in status line", view)
 	}
 }
@@ -631,3 +631,14 @@ func newTestQueries(t *testing.T) *db.Queries {
 }
 
 var _ tea.Model = Model{}
+
+func footerHasNotificationLine(rendered string, want string) bool {
+	lines := strings.Split(rendered, "\n")
+	for idx, line := range lines {
+		if strings.Contains(line, want) && idx+1 < len(lines) && strings.Contains(lines[idx+1], "j/k or arrows: move") {
+			return true
+		}
+	}
+
+	return false
+}

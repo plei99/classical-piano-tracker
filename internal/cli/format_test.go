@@ -79,7 +79,6 @@ func TestPrintValidatedPianists(t *testing.T) {
 			},
 			SpotifyName: "Radu Lupu",
 			SpotifyID:   "artist-1",
-			Popularity:  55,
 			Genres:      []string{"classical piano"},
 		},
 	})
@@ -89,7 +88,6 @@ func TestPrintValidatedPianists(t *testing.T) {
 		"Summary: You like fire and lyricism.",
 		"1. Radu Lupu",
 		"Spotify ID: artist-1",
-		"Popularity: 55",
 		"Genres:     classical piano",
 		"Similar to: Martha Argerich",
 		"Why:        Poetic contrast to your current favorites.",
@@ -97,6 +95,37 @@ func TestPrintValidatedPianists(t *testing.T) {
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output = %q, want %q", output, want)
+		}
+	}
+	if strings.Contains(output, "Popularity:") {
+		t.Fatalf("output = %q, did not expect popularity field", output)
+	}
+}
+
+func TestPrintValidatedPianistsWrapsLongText(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	printValidatedPianists(
+		&out,
+		"Your taste centers on modern virtuoso pianism with exceptional clarity, control, and intelligence across large-scale Romantic and modern repertoire.",
+		[]recommend.ValidatedPianist{
+			{
+				SuggestedPianist: recommend.SuggestedPianist{
+					PianistName: "Arcadi Volodos",
+					WhyFit:      "Your profile strongly favors dazzling technique that stays musically controlled, with enough tonal imagination and rhythmic command to keep complex repertoire coherent.",
+					SimilarTo:   []string{"Yuja Wang", "Martha Argerich", "Yunchan Lim"},
+					Confidence:  "high",
+				},
+				SpotifyName: "Arcadi Volodos",
+				SpotifyID:   "artist-1",
+			},
+		},
+	)
+
+	for _, line := range strings.Split(strings.TrimRight(out.String(), "\n"), "\n") {
+		if len(line) > fallbackOutputWidth {
+			t.Fatalf("line length = %d, want <= %d: %q", len(line), fallbackOutputWidth, line)
 		}
 	}
 }

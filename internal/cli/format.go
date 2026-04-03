@@ -3,12 +3,18 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
+	"unicode/utf8"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/plei99/classical-piano-tracker/internal/recommend"
 	spotifyclient "github.com/plei99/classical-piano-tracker/internal/spotify"
 )
+
+const fallbackOutputWidth = 100
 
 // printRecentSpotifyTracks renders recent-play output in a human-scannable
 // block format instead of the older single-line dump.
@@ -47,25 +53,79 @@ func printFavoritePianists(out io.Writer, profiles []recommend.PianistProfile) {
 }
 
 // printValidatedPianists renders the validated subset of LLM suggestions after
-// Spotify catalog lookup has attached IDs, genres, and popularity.
+// Spotify catalog lookup has attached IDs and genres.
 func printValidatedPianists(out io.Writer, summary string, pianists []recommend.ValidatedPianist) {
-	fmt.Fprintf(out, "Summary: %s\n\n", summary)
+	width := outputWidth(out)
+	printWrappedField(out, "Summary: ", "", summary, width)
+	fmt.Fprintln(out)
 	for idx, pianist := range pianists {
 		fmt.Fprintf(out, "%d. %s\n", idx+1, pianist.SpotifyName)
 		fmt.Fprintf(out, "   Spotify ID: %s\n", pianist.SpotifyID)
-		fmt.Fprintf(out, "   Popularity: %d\n", pianist.Popularity)
 		if len(pianist.Genres) > 0 {
-			fmt.Fprintf(out, "   Genres:     %s\n", strings.Join(pianist.Genres, ", "))
+			printWrappedField(out, "   Genres:     ", "               ", strings.Join(pianist.Genres, ", "), width)
 		}
 		if len(pianist.SimilarTo) > 0 {
-			fmt.Fprintf(out, "   Similar to: %s\n", strings.Join(pianist.SimilarTo, ", "))
+			printWrappedField(out, "   Similar to: ", "               ", strings.Join(pianist.SimilarTo, ", "), width)
 		}
-		fmt.Fprintf(out, "   Why:        %s\n", pianist.WhyFit)
+		printWrappedField(out, "   Why:        ", "               ", pianist.WhyFit, width)
 		if strings.TrimSpace(pianist.Confidence) != "" {
 			fmt.Fprintf(out, "   Confidence: %s\n", pianist.Confidence)
 		}
 		if idx < len(pianists)-1 {
 			fmt.Fprintln(out)
 		}
+	}
+}
+
+func outputWidth(out io.Writer) int {
+	type fdWriter interface {
+		Fd() uintptr
+	}
+
+	if file, ok := out.(fdWriter); ok {
+		if width, _, err := term.GetSize(file.Fd()); err == nil && width >= 40 {
+			return width
+		}
+	}
+
+	if columns, err := strconv.Atoi(strings.TrimSpace(os.Getenv("COLUMNS"))); err == nil && columns >= 40 {
+		return columns
+	}
+
+	return fallbackOutputWidth
+}
+
+func printWrappedField(out io.Writer, firstPrefix string, nextPrefix string, value string, width int) {
+	text := strings.Join(strings.Fields(value), " ")
+	if text == "" {
+		fmt.Fprintln(out, strings.TrimRight(firstPrefix, " "))
+		return
+	}
+
+	linePrefix := firstPrefix
+	available := max(20, width-utf8.RuneCountInString(linePrefix))
+	current := strings.Builder{}
+
+	for _, word := range strings.Fields(text) {
+		if current.Len() == 0 {
+			current.WriteString(word)
+			continue
+		}
+
+		if utf8.RuneCountInString(current.String())+1+utf8.RuneCountInString(word) <= available {
+			current.WriteByte(' ')
+			current.WriteString(word)
+			continue
+		}
+
+		fmt.Fprintln(out, linePrefix+current.String())
+		linePrefix = nextPrefix
+		available = max(20, width-utf8.RuneCountInString(linePrefix))
+		current.Reset()
+		current.WriteString(word)
+	}
+
+	if current.Len() > 0 {
+		fmt.Fprintln(out, linePrefix+current.String())
 	}
 }

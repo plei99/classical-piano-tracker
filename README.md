@@ -19,6 +19,7 @@ Based on the author's testing so far, `gpt-5.4` seems to produce the best recomm
 ## What It Does
 
 - Sync your recent Spotify plays into a local SQLite database
+- On macOS, keep that database updated automatically with an hourly `launchd` sync job installed by `make install`
 - Filter synced tracks through a pianist allowlist and artist blocklist
 - Rate tracks with stars and optional comments
 - Browse, sync, and rate tracks in a terminal UI
@@ -73,6 +74,8 @@ runs `tracker sync` once per hour and at login. Logs go to:
 ~/Library/Logs/piano-tracker/sync.out.log
 ~/Library/Logs/piano-tracker/sync.err.log
 ```
+
+That background job uses the same installed binary and the same default config/database paths as the interactive CLI.
 
 Override that location if you want:
 
@@ -130,6 +133,8 @@ tracker spotify login
 tracker sync
 tracker tui
 ```
+
+If you installed with `make install` on macOS, the hourly LaunchAgent sync will continue running in the background after the initial `tracker spotify login`.
 
 ### Manual setup
 

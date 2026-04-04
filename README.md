@@ -246,6 +246,7 @@ Optional:
 
 ```bash
 go run ./cmd/tracker sync --limit 50
+go run ./cmd/tracker sync status
 ```
 
 Sync behavior:
@@ -255,6 +256,9 @@ Sync behavior:
 3. Accept a track only if at least one artist is in `pianists_allowlist`
 4. UPSERT the track into SQLite by `spotify_id`
 5. Increment `play_count` and update `last_played_at` for repeat listens
+
+`tracker sync status` prints the local-time timestamp of the last successful sync
+checkpoint, or `Last sync: never` if no sync checkpoint has been written yet.
 
 ### Browse local tracks in the CLI
 

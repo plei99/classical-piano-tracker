@@ -2,7 +2,10 @@ package cli
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/plei99/classical-piano-tracker/internal/config"
 	"github.com/plei99/classical-piano-tracker/internal/db"
@@ -19,6 +22,7 @@ func newSyncCmd(opts *rootOptions) *cobra.Command {
 		Short: "Sync recent Spotify plays into the local SQLite database",
 		Example: "  tracker sync\n" +
 			"  tracker sync --limit 25\n" +
+			"  tracker sync status\n" +
 			"  tracker --config ~/custom-config.json --db ~/custom-tracker.db sync",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configPath, err := opts.resolveConfigPath()
@@ -75,9 +79,43 @@ func newSyncCmd(opts *rootOptions) *cobra.Command {
 		},
 	}
 
+	cmd.AddCommand(newSyncStatusCmd(opts))
 	cmd.Flags().IntVar(&limit, "limit", 50, "maximum number of recent plays to fetch from Spotify (1-50)")
 
 	return cmd
+}
+
+func newSyncStatusCmd(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Print the timestamp of the last successful sync checkpoint",
+		Example: "  tracker sync status\n" +
+			"  tracker --db ~/custom-tracker.db sync status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			databasePath, err := opts.resolveDBPath()
+			if err != nil {
+				return err
+			}
+
+			queries, closeDB, err := openQueries(cmd.Context(), databasePath)
+			if err != nil {
+				return err
+			}
+			defer closeDB()
+
+			checkpointNS, err := queries.GetRecentPlayCheckpoint(cmd.Context())
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					cmd.Println("Last sync: never")
+					return nil
+				}
+				return fmt.Errorf("load recent play checkpoint: %w", err)
+			}
+
+			cmd.Printf("Last sync: %s\n", time.Unix(0, checkpointNS).Local().Format("January 2, 2006 at 3:04 PM MST"))
+			return nil
+		},
+	}
 }
 
 func openQueries(ctx context.Context, databasePath string) (*db.Queries, func(), error) {

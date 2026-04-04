@@ -288,3 +288,33 @@ func TestClientSuggestNewPianistsRejectsDiscoveryInputWithoutEnoughRatings(t *te
 		t.Fatal("SuggestNewPianists() error = nil, want validation error")
 	}
 }
+
+func TestClientSummarizeTasteBuildsSummaryRequestAndParsesResult(t *testing.T) {
+	t.Parallel()
+
+	provider := &stubProvider{
+		raws: []string{`{"summary":"You gravitate toward vivid, rhythmically incisive pianism with strong contrapuntal clarity."}`},
+	}
+	client, err := NewClient(provider)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	got, err := client.SummarizeTaste(context.Background(), recommend.TasteSummary{
+		TotalRatings:     3,
+		FavoritePianists: []recommend.FavoritePianist{{Name: "Martha Argerich"}},
+		KnownPianists:    []string{"Martha Argerich"},
+	})
+	if err != nil {
+		t.Fatalf("SummarizeTaste() error = %v", err)
+	}
+	if got != "You gravitate toward vivid, rhythmically incisive pianism with strong contrapuntal clarity." {
+		t.Fatalf("SummarizeTaste() = %q", got)
+	}
+	if len(provider.reqs) != 1 {
+		t.Fatalf("len(provider.reqs) = %d, want 1", len(provider.reqs))
+	}
+	if provider.reqs[0].Schema == nil || provider.reqs[0].Schema.Name != "taste_summary" {
+		t.Fatalf("provider.reqs[0].Schema = %#v, want taste_summary schema", provider.reqs[0].Schema)
+	}
+}

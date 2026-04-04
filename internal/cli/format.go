@@ -52,6 +52,77 @@ func printFavoritePianists(out io.Writer, profiles []recommend.PianistProfile) {
 	_ = writer.Flush()
 }
 
+// printTasteProfile renders the profile snapshot sent to the LLM, excluding
+// the internal discovery-guidance prompt text.
+func printTasteProfile(out io.Writer, summary recommend.TasteSummary) {
+	width := outputWidth(out)
+	fmt.Fprintf(
+		out,
+		"Tracks: %d\nRatings: %d\nComments: %d\nKnown Pianists: %d\n\n",
+		summary.TotalTracks,
+		summary.TotalRatings,
+		summary.CommentCount,
+		len(summary.KnownPianists),
+	)
+
+	fmt.Fprintln(out, "Favorite Pianists")
+	if len(summary.FavoritePianists) == 0 {
+		fmt.Fprintln(out, "  none")
+	} else {
+		writer := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(writer, "  #\tPianist\tScore\tAvg Stars\tRated Tracks\tTotal Plays")
+		for idx, pianist := range summary.FavoritePianists {
+			fmt.Fprintf(
+				writer,
+				"  %d\t%s\t%.2f\t%.2f\t%d\t%d\n",
+				idx+1,
+				pianist.Name,
+				pianist.FavoriteScore,
+				pianist.AverageStars,
+				pianist.RatedTrackCount,
+				pianist.TotalPlayCount,
+			)
+		}
+		_ = writer.Flush()
+	}
+
+	fmt.Fprintln(out)
+	printTasteTracks(out, "Loved Tracks", summary.LovedTracks, width)
+	fmt.Fprintln(out)
+	printTasteTracks(out, "Disliked Tracks", summary.DislikedTracks, width)
+	fmt.Fprintln(out)
+	printTasteTracks(out, "Commented Tracks", summary.CommentedTracks, width)
+	fmt.Fprintln(out)
+	printWrappedField(out, "Known Pianists: ", "                ", strings.Join(summary.KnownPianists, ", "), width)
+}
+
+func printTasteTracks(out io.Writer, heading string, tracks []recommend.TasteTrack, width int) {
+	fmt.Fprintln(out, heading)
+	if len(tracks) == 0 {
+		fmt.Fprintln(out, "  none")
+		return
+	}
+
+	for idx, track := range tracks {
+		fmt.Fprintf(out, "  %d. [%d] %s\n", idx+1, track.TrackID, track.TrackName)
+		printWrappedField(out, "     Artists: ", "              ", strings.Join(track.Artists, ", "), width)
+		if strings.TrimSpace(track.MatchedArtist) != "" {
+			fmt.Fprintf(out, "     Matched: %s\n", track.MatchedArtist)
+		}
+		if strings.TrimSpace(track.AlbumName) != "" {
+			printWrappedField(out, "     Album:   ", "              ", track.AlbumName, width)
+		}
+		fmt.Fprintf(out, "     Stars:   %d/5\n", track.Stars)
+		fmt.Fprintf(out, "     Plays:   %d\n", track.PlayCount)
+		if strings.TrimSpace(track.Opinion) != "" {
+			printWrappedField(out, "     Opinion: ", "              ", track.Opinion, width)
+		}
+		if idx < len(tracks)-1 {
+			fmt.Fprintln(out)
+		}
+	}
+}
+
 // printValidatedPianists renders the validated subset of LLM suggestions after
 // Spotify catalog lookup has attached IDs and genres.
 func printValidatedPianists(out io.Writer, summary string, pianists []recommend.ValidatedPianist) {

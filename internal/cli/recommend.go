@@ -20,11 +20,15 @@ func newRecommendCmd(opts *rootOptions) *cobra.Command {
 		Use:   "recommend",
 		Short: "Analyze favorites and generate pianist recommendations",
 		Example: "  tracker recommend favorites\n" +
+			"  tracker recommend profile\n" +
+			"  tracker recommend summary\n" +
 			"  tracker recommend pianists --limit 5",
 	}
 
 	cmd.AddCommand(
 		newRecommendFavoritesCmd(opts),
+		newRecommendProfileCmd(opts),
+		newRecommendSummaryCmd(opts),
 		newRecommendPianistsCmd(opts),
 	)
 
@@ -80,6 +84,55 @@ func newRecommendFavoritesCmd(opts *rootOptions) *cobra.Command {
 	return cmd
 }
 
+func newRecommendProfileCmd(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "profile",
+		Short: "Print the local taste profile used for recommendations",
+		Example: "  tracker recommend profile\n" +
+			"  tracker --config /custom/config.json --db /custom/tracker.db recommend profile",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, summary, err := loadTasteSummary(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+
+			printTasteProfile(cmd.OutOrStdout(), summary)
+			return nil
+		},
+	}
+}
+
+func newRecommendSummaryCmd(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "summary",
+		Short: "Ask the active LLM profile to summarize your local taste profile",
+		Example: "  tracker recommend summary\n" +
+			"  LLM_PROFILE=anthropic tracker recommend summary",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, summary, err := loadTasteSummary(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			if err := recommend.ValidateDiscoveryInput(summary); err != nil {
+				return fmt.Errorf("not enough local rating data for taste summary generation yet: %w", err)
+			}
+
+			llmClient, err := newRecommendationLLMClient(cfg)
+			if err != nil {
+				return err
+			}
+
+			text, err := llmClient.SummarizeTaste(cmd.Context(), summary)
+			if err != nil {
+				return err
+			}
+
+			printWrappedField(cmd.OutOrStdout(), "Summary: ", "", text, outputWidth(cmd.OutOrStdout()))
+			return nil
+		},
+	}
+}
+
 func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 	var limit int
 
@@ -125,12 +178,7 @@ func newRecommendPianistsCmd(opts *rootOptions) *cobra.Command {
 				return fmt.Errorf("not enough local rating data for pianist recommendations yet: %w", err)
 			}
 
-			provider, err := providers.FromConfig(cfg)
-			if err != nil {
-				return err
-			}
-
-			llmClient, err := llm.NewClient(provider)
+			llmClient, err := newRecommendationLLMClient(cfg)
 			if err != nil {
 				return err
 			}
@@ -212,6 +260,36 @@ func loadRecommendationData(ctx context.Context, opts *rootOptions) ([]db.Track,
 	}
 
 	return tracks, ratings, nil
+}
+
+func loadTasteSummary(ctx context.Context, opts *rootOptions) (*config.Config, recommend.TasteSummary, error) {
+	cfg, _, err := loadRecommendationConfig(opts)
+	if err != nil {
+		return nil, recommend.TasteSummary{}, err
+	}
+	if len(cfg.PianistsAllowlist) == 0 {
+		return nil, recommend.TasteSummary{}, fmt.Errorf("config has an empty pianists_allowlist")
+	}
+
+	tracks, ratings, err := loadRecommendationData(ctx, opts)
+	if err != nil {
+		return nil, recommend.TasteSummary{}, err
+	}
+
+	summary, err := recommend.BuildTasteSummary(tracks, ratings, cfg.PianistsAllowlist)
+	if err != nil {
+		return nil, recommend.TasteSummary{}, err
+	}
+
+	return cfg, summary, nil
+}
+
+func newRecommendationLLMClient(cfg *config.Config) (*llm.Client, error) {
+	provider, err := providers.FromConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return llm.NewClient(provider)
 }
 
 func discoveryRequestLimit(limit int) int {

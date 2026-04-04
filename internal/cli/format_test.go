@@ -65,6 +65,64 @@ func TestPrintFavoritePianists(t *testing.T) {
 	}
 }
 
+func TestPrintTasteProfile(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	printTasteProfile(&out, recommend.TasteSummary{
+		TotalTracks:  12,
+		TotalRatings: 4,
+		CommentCount: 2,
+		FavoritePianists: []recommend.FavoritePianist{
+			{
+				Name:            "Martha Argerich",
+				RatedTrackCount: 3,
+				TotalPlayCount:  9,
+				AverageStars:    4.67,
+				FavoriteScore:   127.31,
+			},
+		},
+		LovedTracks: []recommend.TasteTrack{
+			{
+				TrackID:       42,
+				TrackName:     "Gaspard de la nuit: Scarbo",
+				AlbumName:     "Ravel",
+				Artists:       []string{"Martha Argerich"},
+				PlayCount:     5,
+				Stars:         5,
+				Opinion:       "Electrifying and rhythmically alive.",
+				MatchedArtist: "Martha Argerich",
+			},
+		},
+		KnownPianists:     []string{"Martha Argerich", "Yuja Wang"},
+		DiscoveryGuidance: "Recommend real classical concert pianists not already present in the known pianist list.",
+	})
+
+	output := out.String()
+	for _, want := range []string{
+		"Tracks: 12",
+		"Ratings: 4",
+		"Comments: 2",
+		"Known Pianists: 2",
+		"Favorite Pianists",
+		"Martha Argerich",
+		"Loved Tracks",
+		"[42] Gaspard de la nuit: Scarbo",
+		"Matched: Martha Argerich",
+		"Opinion: Electrifying and rhythmically alive.",
+		"Disliked Tracks",
+		"Commented Tracks",
+		"Known Pianists: Martha Argerich, Yuja Wang",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output = %q, want %q", output, want)
+		}
+	}
+	if strings.Contains(output, "Discovery Guidance:") {
+		t.Fatalf("output = %q, did not expect discovery guidance", output)
+	}
+}
+
 func TestPrintValidatedPianists(t *testing.T) {
 	t.Parallel()
 

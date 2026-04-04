@@ -372,6 +372,28 @@ func ParseDiscoveryResult(raw string) (DiscoveryResult, error) {
 	return result, nil
 }
 
+// ParseTasteSummary extracts a summary-only LLM response and tolerates fenced
+// JSON or plain text when a provider ignores the schema wrapper.
+func ParseTasteSummary(raw string) (string, error) {
+	result, cleaned, err := parseDiscoveryPartial(raw)
+	if err == nil && strings.TrimSpace(result.Summary) != "" {
+		return strings.TrimSpace(result.Summary), nil
+	}
+
+	cleaned = cleanLLMText(raw)
+	if cleaned == "" {
+		return "", errors.New("LLM taste summary response omitted summary")
+	}
+	if err == nil {
+		return "", fmt.Errorf("LLM taste summary response omitted summary: %s", previewJSON(cleaned))
+	}
+	if strings.HasPrefix(cleaned, "{") || strings.HasPrefix(cleaned, "[") {
+		return "", fmt.Errorf("decode LLM taste summary response: %w", err)
+	}
+
+	return cleaned, nil
+}
+
 // ParseDiscoveryPartial normalizes a provider response without requiring every
 // field to be present. It is used internally by the LLM client's repair logic.
 func ParseDiscoveryPartial(raw string) (DiscoveryResult, error) {
@@ -454,11 +476,7 @@ func ParsePlaintextRecommendations(raw string) ([]SuggestedPianist, error) {
 }
 
 func parseDiscoveryPartial(raw string) (DiscoveryResult, string, error) {
-	cleaned := strings.TrimSpace(raw)
-	cleaned = strings.TrimPrefix(cleaned, "```json")
-	cleaned = strings.TrimPrefix(cleaned, "```")
-	cleaned = strings.TrimSuffix(cleaned, "```")
-	cleaned = strings.TrimSpace(cleaned)
+	cleaned := cleanLLMText(raw)
 
 	var result DiscoveryResult
 	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
@@ -470,6 +488,14 @@ func parseDiscoveryPartial(raw string) (DiscoveryResult, string, error) {
 	}
 
 	return result, cleaned, nil
+}
+
+func cleanLLMText(raw string) string {
+	cleaned := strings.TrimSpace(raw)
+	cleaned = strings.TrimPrefix(cleaned, "```json")
+	cleaned = strings.TrimPrefix(cleaned, "```")
+	cleaned = strings.TrimSuffix(cleaned, "```")
+	return strings.TrimSpace(cleaned)
 }
 
 func parseDiscoveryAliases(cleaned string) (DiscoveryResult, bool) {

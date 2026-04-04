@@ -325,6 +325,29 @@ Inside the rating editor:
 
 ## Recommendations
 
+### Taste profile
+
+This prints the local profile assembled from your database and allowlist, without
+calling any LLM provider or Spotify validation.
+
+```bash
+go run ./cmd/tracker recommend profile
+```
+
+The output includes corpus totals, favorite pianists, loved/disliked tracks,
+commented tracks, and known pianists. It intentionally omits the internal
+discovery-guidance prompt string.
+
+### Taste summary
+
+This builds the same local profile and asks the active LLM provider for a prose
+summary of your listening taste, without requesting new pianist recommendations.
+
+```bash
+go run ./cmd/tracker recommend summary
+LLM_PROFILE=anthropic go run ./cmd/tracker recommend summary
+```
+
 ### Favorite pianists
 
 This is deterministic and local-only.

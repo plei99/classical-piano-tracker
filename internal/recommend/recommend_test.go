@@ -139,6 +139,24 @@ func TestParseDiscoveryResultAcceptsNestedResultAlias(t *testing.T) {
 	}
 }
 
+func TestParseTasteSummaryHandlesJSONPlaintextAndFences(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{
+		`{"summary":"You prefer high-voltage precision with clear voicing."}`,
+		"```json\n{\"summary\":\"You prefer high-voltage precision with clear voicing.\"}\n```",
+		"You prefer high-voltage precision with clear voicing.",
+	} {
+		got, err := ParseTasteSummary(raw)
+		if err != nil {
+			t.Fatalf("ParseTasteSummary(%q) error = %v", raw, err)
+		}
+		if got != "You prefer high-voltage precision with clear voicing." {
+			t.Fatalf("ParseTasteSummary(%q) = %q", raw, got)
+		}
+	}
+}
+
 func TestParseDiscoveryRecommendationsAcceptsRecommendationsOnlyPayload(t *testing.T) {
 	t.Parallel()
 

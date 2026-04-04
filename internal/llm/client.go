@@ -110,6 +110,26 @@ func (c *Client) SuggestNewPianists(ctx context.Context, summary recommend.Taste
 	return result, nil
 }
 
+// SummarizeTaste asks the active provider for a summary-only description of
+// the current taste profile.
+func (c *Client) SummarizeTaste(ctx context.Context, summary recommend.TasteSummary) (string, error) {
+	req, err := buildTasteSummaryRequest(summary)
+	if err != nil {
+		return "", err
+	}
+
+	raw, err := c.provider.Generate(ctx, req)
+	if err != nil {
+		return "", err
+	}
+
+	text, err := recommend.ParseTasteSummary(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse LLM taste summary response: %w", err)
+	}
+	return text, nil
+}
+
 func shouldRepairDiscoveryResponse(err error) bool {
 	if err == nil {
 		return false

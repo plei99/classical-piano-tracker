@@ -155,3 +155,34 @@ func minimumDiscoveryRecommendations(limit int) int {
 		return 5
 	}
 }
+
+// buildTasteSummaryRequest asks the provider for a prose description of the
+// user's current listening and rating profile, not for recommendations.
+func buildTasteSummaryRequest(summary recommend.TasteSummary) (Request, error) {
+	summary.DiscoveryGuidance = ""
+	summaryJSON, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		return Request{}, fmt.Errorf("marshal taste summary: %w", err)
+	}
+
+	return Request{
+		SystemPrompt: "You are a classical piano listening analyst. Summarize the user's listening taste from the supplied ratings, comments, and favorite-pianist aggregates. Do not recommend new pianists or tracks. Return one concise but specific prose summary grounded only in the supplied JSON.",
+		UserPrompt:   fmt.Sprintf("Summarize this user taste profile in one paragraph. Describe repertoire, interpretive style, and pianist preferences when those signals are present. Return a JSON object with a single non-empty summary string.\n\n%s", string(summaryJSON)),
+		OutputMode:   StructuredOutputModeStrict,
+		Schema: &JSONSchema{
+			Name: "taste_summary",
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"summary": map[string]any{
+						"type":      "string",
+						"minLength": 1,
+					},
+				},
+				"required":             []string{"summary"},
+				"additionalProperties": false,
+			},
+			Strict: true,
+		},
+	}, nil
+}

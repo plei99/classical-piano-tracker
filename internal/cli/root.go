@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+
 	"github.com/plei99/classical-piano-tracker/internal/buildinfo"
 	"github.com/plei99/classical-piano-tracker/internal/config"
 	"github.com/plei99/classical-piano-tracker/internal/paths"
@@ -43,6 +45,8 @@ func NewRootCmd() *cobra.Command {
 		"path to the SQLite database file",
 	)
 	cmd.SetVersionTemplate("tracker {{.Version}}\n")
+	cmd.SetOut(os.Stdout)
+	cmd.SetErr(os.Stderr)
 
 	cmd.AddCommand(newConfigCmd(opts))
 	cmd.AddCommand(newListCmd(opts))

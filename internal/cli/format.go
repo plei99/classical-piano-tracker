@@ -70,14 +70,13 @@ func printTasteProfile(out io.Writer, summary recommend.TasteSummary) {
 		fmt.Fprintln(out, "  none")
 	} else {
 		writer := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(writer, "  #\tPianist\tScore\tAvg Stars\tRated Tracks\tTotal Plays")
+		fmt.Fprintln(writer, "  #\tPianist\tAvg Stars\tRated Tracks\tTotal Plays")
 		for idx, pianist := range summary.FavoritePianists {
 			fmt.Fprintf(
 				writer,
-				"  %d\t%s\t%.2f\t%.2f\t%d\t%d\n",
+				"  %d\t%s\t%.2f\t%d\t%d\n",
 				idx+1,
 				pianist.Name,
-				pianist.FavoriteScore,
 				pianist.AverageStars,
 				pianist.RatedTrackCount,
 				pianist.TotalPlayCount,

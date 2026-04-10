@@ -2,6 +2,8 @@ package recommend
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/plei99/classical-piano-tracker/internal/db"
@@ -76,6 +78,14 @@ func TestBuildTasteSummaryCollectsCommentsAndFavorites(t *testing.T) {
 	}
 	if len(summary.KnownPianists) != 2 || summary.KnownPianists[1] != "Daniil Trifonov" {
 		t.Fatalf("KnownPianists = %+v, want allowlist-backed names", summary.KnownPianists)
+	}
+
+	data, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if strings.Contains(string(data), "favorite_score") {
+		t.Fatalf("summary JSON = %s, did not expect favorite_score in LLM-facing payload", data)
 	}
 }
 

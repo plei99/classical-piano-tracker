@@ -79,7 +79,6 @@ func TestPrintTasteProfile(t *testing.T) {
 				RatedTrackCount: 3,
 				TotalPlayCount:  9,
 				AverageStars:    4.67,
-				FavoriteScore:   127.31,
 			},
 		},
 		LovedTracks: []recommend.TasteTrack{

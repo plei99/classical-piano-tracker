@@ -53,7 +53,6 @@ type FavoritePianist struct {
 	RatedTrackCount int     `json:"rated_track_count"`
 	TotalPlayCount  int64   `json:"total_play_count"`
 	AverageStars    float64 `json:"average_stars"`
-	FavoriteScore   float64 `json:"favorite_score"`
 }
 
 // TasteSummary is the compact corpus snapshot sent to the LLM. It is designed
@@ -246,7 +245,6 @@ func BuildTasteSummary(tracks []db.Track, ratings []db.Rating, allowlist []strin
 			RatedTrackCount: profile.RatedTrackCount,
 			TotalPlayCount:  profile.TotalPlayCount,
 			AverageStars:    roundToTwoDecimals(profile.AverageStars),
-			FavoriteScore:   roundToTwoDecimals(profile.FavoriteScore),
 		})
 	}
 

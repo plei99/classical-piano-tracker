@@ -174,3 +174,89 @@ func TestFromConfigUsesDeepSeekAPIKeyFallback(t *testing.T) {
 		t.Fatalf("baseURL = %q, want DeepSeek default", openAICompat.baseURL)
 	}
 }
+
+func TestFromConfigSupportsClaudeCLIProfileWithoutAPIKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("LLM_API_KEY", "")
+
+	provider, err := FromConfig(&config.Config{
+		LLM: config.LLMConfig{
+			ActiveProfile: "claude_cli",
+			Profiles: map[string]config.LLMProfile{
+				"claude_cli": {
+					Provider: "claude_cli",
+					Model:    "opus",
+					Command:  "/opt/bin/claude",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("FromConfig() error = %v", err)
+	}
+
+	cli, ok := provider.(*claudeCLIProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *claudeCLIProvider", provider)
+	}
+	if cli.model != "opus" {
+		t.Fatalf("model = %q, want opus", cli.model)
+	}
+	if cli.command != "/opt/bin/claude" {
+		t.Fatalf("command = %q, want /opt/bin/claude", cli.command)
+	}
+}
+
+func TestFromConfigHonorsLLMCommandOverrideForClaudeCLI(t *testing.T) {
+	t.Setenv("LLM_COMMAND", "/override/claude")
+
+	provider, err := FromConfig(&config.Config{
+		LLM: config.LLMConfig{
+			ActiveProfile: "claude_cli",
+			Profiles: map[string]config.LLMProfile{
+				"claude_cli": {Provider: "claude_cli", Command: "/config/claude"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("FromConfig() error = %v", err)
+	}
+
+	cli, ok := provider.(*claudeCLIProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *claudeCLIProvider", provider)
+	}
+	if cli.command != "/override/claude" {
+		t.Fatalf("command = %q, want LLM_COMMAND override", cli.command)
+	}
+}
+
+func TestFromConfigSupportsCodexWithoutKeyOrModel(t *testing.T) {
+	for _, name := range []string{"LLM_PROFILE", "LLM_PROVIDER", "LLM_MODEL", "LLM_COMMAND", "LLM_API_KEY"} {
+		t.Setenv(name, "")
+	}
+	cfg := &config.Config{LLM: config.LLMConfig{ActiveProfile: "local-codex", Profiles: map[string]config.LLMProfile{
+		"local-codex": {Provider: "codex", Command: "/opt/bin/codex"},
+	}}}
+	provider, err := FromConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := provider.(*codexProvider)
+	if !ok {
+		t.Fatalf("provider = %T", provider)
+	}
+	if p.model != "" || p.command != "/opt/bin/codex" {
+		t.Fatalf("provider = %+v", p)
+	}
+	t.Setenv("LLM_MODEL", "override-model")
+	t.Setenv("LLM_COMMAND", "/override/codex")
+	provider, err = FromConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p = provider.(*codexProvider)
+	if p.model != "override-model" || p.command != "/override/codex" {
+		t.Fatalf("provider = %+v", p)
+	}
+}

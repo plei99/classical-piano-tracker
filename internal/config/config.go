@@ -145,6 +145,9 @@ type LLMProfile struct {
 	Model    string `json:"model,omitempty"`
 	APIKey   string `json:"api_key,omitempty"`
 	BaseURL  string `json:"base_url,omitempty"`
+	// Command is the executable used by the codex and claude_cli providers.
+	// Leave it empty to resolve the default command from PATH at runtime.
+	Command string `json:"command,omitempty"`
 }
 
 // UnmarshalJSON accepts both the canonical underscore names and a small set of
@@ -176,6 +179,7 @@ func (p *LLMProfile) UnmarshalJSON(data []byte) error {
 		APIKeyAlt  string `json:"api-key"`
 		BaseURL    string `json:"base_url"`
 		BaseURLAlt string `json:"base-url"`
+		Command    string `json:"command"`
 	}
 
 	var raw profileJSON
@@ -189,6 +193,7 @@ func (p *LLMProfile) UnmarshalJSON(data []byte) error {
 	p.Model = strings.TrimSpace(raw.Model)
 	p.APIKey = strings.TrimSpace(firstNonEmpty(raw.APIKey, raw.APIKeyAlt))
 	p.BaseURL = strings.TrimSpace(firstNonEmpty(raw.BaseURL, raw.BaseURLAlt))
+	p.Command = strings.TrimSpace(raw.Command)
 	return nil
 }
 
@@ -580,7 +585,9 @@ func (c LLMConfig) validate() []string {
 	if strings.TrimSpace(profile.Provider) == "" {
 		problems = append(problems, fmt.Sprintf("llm.profiles.%s.provider is required", c.ActiveProfile))
 	}
-	if strings.TrimSpace(profile.Model) == "" {
+	// CLI-backed profiles can defer model selection to the installed CLI.
+	provider := strings.ToLower(strings.TrimSpace(profile.Provider))
+	if strings.TrimSpace(profile.Model) == "" && provider != "codex" && provider != "claude_cli" {
 		problems = append(problems, fmt.Sprintf("llm.profiles.%s.model is required", c.ActiveProfile))
 	}
 

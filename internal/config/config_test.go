@@ -461,3 +461,82 @@ func containsString(items []string, want string) bool {
 
 	return false
 }
+
+func TestLoadAcceptsLLMProfileCommandField(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	body := `{
+  "spotify": {
+    "client_id": "client-id",
+    "client_secret": "client-secret"
+  },
+  "llm": {
+    "active_profile": "claude_cli",
+    "profiles": {
+      "claude_cli": {
+        "provider": "claude_cli",
+        "model": "sonnet",
+        "command": "/Users/example/.local/bin/claude"
+      }
+    }
+  },
+  "pianists_allowlist": ["Martha Argerich"],
+  "artists_blocklist": []
+}`
+
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	profile := cfg.EffectiveLLMConfig().Profiles["claude_cli"]
+	if profile.Command != "/Users/example/.local/bin/claude" {
+		t.Fatalf("profile.Command = %q, want configured claude path", profile.Command)
+	}
+
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(data), `"command": "/Users/example/.local/bin/claude"`) {
+		t.Fatalf("saved config does not round-trip command field: %s", data)
+	}
+}
+
+func TestCLIProfilesPermitDefaultModel(t *testing.T) {
+	t.Parallel()
+	for _, provider := range []string{"codex", "claude_cli", " CODEX "} {
+		cfg := &Config{Spotify: SpotifyConfig{ClientID: "id", ClientSecret: "secret"}, PianistsAllowlist: []string{"Martha Argerich"},
+			LLM: LLMConfig{ActiveProfile: "cli", Profiles: map[string]LLMProfile{"cli": {Provider: provider, Command: "/opt/bin/tool"}}},
+		}
+		path := filepath.Join(t.TempDir(), "config.json")
+		if err := Save(path, cfg); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := loaded.Validate(); err != nil {
+			t.Fatalf("%s validation: %v", provider, err)
+		}
+		profile := loaded.EffectiveLLMConfig().Profiles["cli"]
+		if profile.Model != "" || profile.Command != "/opt/bin/tool" {
+			t.Fatalf("profile = %+v", profile)
+		}
+	}
+	for _, provider := range []string{"openai", "anthropic", "google", "openai_compat"} {
+		cfg := LLMConfig{ActiveProfile: "api", Profiles: map[string]LLMProfile{"api": {Provider: provider}}}
+		if len(cfg.validate()) == 0 {
+			t.Fatalf("%s unexpectedly permits empty model", provider)
+		}
+	}
+}

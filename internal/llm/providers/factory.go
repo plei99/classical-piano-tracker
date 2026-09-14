@@ -23,6 +23,10 @@ func FromConfig(cfg *config.Config) (llm.Provider, error) {
 		return NewAnthropic(profile.APIKey, profile.Model, profile.BaseURL, nil)
 	case "google":
 		return NewGoogle(profile.APIKey, profile.Model, profile.BaseURL, nil)
+	case "claude_cli":
+		return NewClaudeCLI(profile.Model, profile.Command, nil)
+	case "codex":
+		return NewCodex(profile.Model, profile.Command, nil)
 	case "openai_compat":
 		if strings.TrimSpace(profile.BaseURL) == "" {
 			profile.BaseURL = defaultOpenAICompatBaseURLForProfile(profileName)
@@ -63,6 +67,9 @@ func resolveProfile(cfg *config.Config) (string, config.LLMProfile, error) {
 	}
 	if apiKey := strings.TrimSpace(os.Getenv("LLM_API_KEY")); apiKey != "" {
 		profile.APIKey = apiKey
+	}
+	if command := strings.TrimSpace(os.Getenv("LLM_COMMAND")); command != "" {
+		profile.Command = command
 	}
 
 	if strings.TrimSpace(profile.Provider) == "" {

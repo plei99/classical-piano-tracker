@@ -31,7 +31,7 @@ Based on the author's testing so far, `gpt-5.4` seems to produce the best recomm
 - Go installed locally
 - a Spotify developer application with a client ID and client secret
 - a Spotify account with listening history to sync
-- optionally, an API key for one supported LLM provider if you want pianist recommendations from the LLM-backed flow
+- optionally, an LLM API key, a local Ollama model, or a signed-in Codex/Claude Code CLI for taste summaries and pianist recommendations
 
 ## Local State
 
@@ -105,7 +105,9 @@ That interactive flow collects:
 - Spotify client secret
 - one LLM provider profile:
   - OpenAI
+  - Codex CLI (`codex exec`, uses your existing Codex login)
   - Anthropic
+  - Claude Code CLI (`claude -p`, uses your existing Claude login, no API key)
   - Google Gemini
   - Ollama
   - DeepSeek
@@ -113,6 +115,9 @@ That interactive flow collects:
 - provider-specific API key and/or base URL when needed
 - a model selection for the chosen provider
 - an initial subset of the default pianist allowlist
+
+Codex uses optional manual model entry instead of a model list. Leave the model
+unset to use the CLI's built-in default. Claude Code offers fixed model aliases.
 
 The onboarding pickers are keyboard-driven:
 
@@ -170,10 +175,18 @@ For LLM-backed recommendations, the config supports named profiles:
         "model": "gpt-5.4",
         "api_key": ""
       },
+      "codex": {
+        "provider": "codex"
+      },
       "anthropic": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-6",
         "api_key": ""
+      },
+      "claude_cli": {
+        "provider": "claude_cli",
+        "model": "sonnet",
+        "command": "/Users/you/.local/bin/claude"
       },
       "google": {
         "provider": "google",
@@ -205,12 +218,13 @@ For LLM-backed recommendations, the config supports named profiles:
 Minimal manual config steps:
 
 1. set `spotify.client_id` and `spotify.client_secret`
-2. choose an `llm.active_profile` such as `openai`, `anthropic`, `google`, `ollama`, `deepseek`, or `kimi`
+2. choose an `llm.active_profile` such as `openai`, `codex`, `anthropic`, `claude_cli`, `google`, `ollama`, `deepseek`, or `kimi`
 3. fill in `llm.profiles.<name>.provider`
-4. fill in `llm.profiles.<name>.model`
+4. fill in `llm.profiles.<name>.model` (optional for `codex` and `claude_cli`)
 5. fill in `llm.profiles.<name>.api_key` when that provider needs one
 6. fill in `llm.profiles.<name>.base_url` for Ollama, DeepSeek, or Kimi when you want a non-default endpoint
-7. adjust `pianists_allowlist` and `artists_blocklist` as needed
+7. for `codex` or `claude_cli`, optionally set `llm.profiles.<name>.command` to the absolute executable path; onboarding preserves an existing path or finds the CLI on `PATH`. This is a binary path, not a shell command with arguments.
+8. adjust `pianists_allowlist` and `artists_blocklist` as needed
 
 After saving the file, validate it with:
 
@@ -379,7 +393,9 @@ This command:
 Supported providers today:
 
 - OpenAI
+- Codex CLI (`codex exec`)
 - Anthropic
+- Claude Code CLI (`claude -p`)
 - Google Gemini
 - OpenAI-compatible backends:
   - Ollama
@@ -393,6 +409,14 @@ Required configuration:
 - either store an API key in `llm.profiles.<name>.api_key`
 - or export a generic/provider-specific API key environment variable
 - for Ollama, you usually do not need an API key
+- for `codex`, install the [Codex CLI](https://developers.openai.com/codex/cli), run `codex login`, and add the `codex` profile shown above or select it during onboarding
+- for `claude_cli`, install [Claude Code](https://claude.com/claude-code), run `claude` once and sign in, and add its profile or select it during onboarding
+
+The CLI providers work with both `recommend summary` and `recommend pianists`.
+Tracker does not read or copy their credentials, and ignores tracker `api_key`
+and `base_url` settings for these providers. Each CLI manages its own login and
+billing: subscription logins use the corresponding account's allowance, while
+API credentials in the CLI's environment can change how requests are billed.
 
 Generic overrides:
 
@@ -401,6 +425,7 @@ export LLM_API_KEY=...
 export LLM_PROFILE=openai
 export LLM_MODEL=gpt-5.4
 export LLM_BASE_URL=https://api.openai.com/v1/responses
+export LLM_COMMAND=/path/to/codex   # codex or claude_cli; executable path only
 ```
 
 Provider-specific API key fallbacks:
@@ -424,23 +449,40 @@ Examples:
 
 ```bash
 LLM_PROFILE=openai go run ./cmd/tracker recommend pianists
+LLM_PROFILE=codex go run ./cmd/tracker recommend pianists
+LLM_PROFILE=codex go run ./cmd/tracker recommend summary
+LLM_PROFILE=codex LLM_MODEL=gpt-5.4 go run ./cmd/tracker recommend pianists
 LLM_PROFILE=anthropic go run ./cmd/tracker recommend pianists
+LLM_PROFILE=claude_cli go run ./cmd/tracker recommend pianists
+LLM_PROFILE=claude_cli LLM_MODEL=opus go run ./cmd/tracker recommend pianists
 LLM_PROFILE=google LLM_MODEL=gemini-3.1-pro-preview go run ./cmd/tracker recommend pianists
 LLM_PROFILE=ollama LLM_PROVIDER=openai_compat LLM_MODEL=qwen2.5:latest LLM_BASE_URL=http://localhost:11434/v1 go run ./cmd/tracker recommend pianists
 LLM_PROFILE=deepseek go run ./cmd/tracker recommend pianists
 LLM_PROFILE=kimi go run ./cmd/tracker recommend pianists
 ```
 
-`LLM_*` env vars override profile settings. Legacy `OPENAI_API_KEY`, `OPENAI_MODEL`, and `OPENAI_BASE_URL` still work for the OpenAI path for compatibility.
+`LLM_*` env vars override profile settings. `LLM_PROFILE` selects a profile that
+already exists; it does not create one. Legacy `OPENAI_API_KEY`, `OPENAI_MODEL`,
+and `OPENAI_BASE_URL` still work for the OpenAI API path for compatibility.
 
 Notes:
 
 - recommendation generation deliberately over-requests candidates before Spotify validation, so `--limit 5` still has a better chance of producing 5 validated pianists
 - Anthropic and OpenAI-compatible backends may take one or more repair passes before the app gets a fully parseable recommendation list
 - slower Gemini models may need noticeably longer response times than OpenAI
+- `codex` uses non-interactive `codex exec`, a read-only sandbox, disabled shell execution/web search, and `--ephemeral`. It skips user configuration and `AGENTS.md` instructions; an unset model uses the CLI's built-in default, not the model in `~/.codex/config.toml`. Set the tracker model or `LLM_MODEL` to override it.
+- Codex receives the task via stdin and the JSON schema via `--output-schema`; tracker reads only `--output-last-message`, not progress output. See [Codex non-interactive mode](https://developers.openai.com/codex/noninteractive).
+- `claude_cli` uses `claude -p --output-format json --tools "" --safe-mode --no-session-persistence`, with MCP servers and skills disabled. Safe mode preserves the saved login; `--bare` cannot be used here because it skips OAuth and Keychain credentials. See [Claude Code programmatic usage](https://code.claude.com/docs/en/headless).
+- `claude_cli` accepts model aliases (`sonnet`, `opus`, `haiku`, `fable`) or full model IDs; omit the model to use the CLI default. Structured requests use `--json-schema`, and tracker extracts the `structured_output` field from Claude's result envelope.
+- both CLI adapters run in private temporary directories, remove their temporary files, and use a five-minute timeout per call. Repair attempts can make the whole command take longer. Neither adapter maps the shared temperature or max-output-token settings to CLI flags.
+- session persistence is disabled, but the CLIs may still write their own diagnostic or account-state files. CLI upgrades can change flag support; the integrations were tested with Codex CLI 0.154.0 and Claude Code 2.1.220.
 
 ### Troubleshooting
 
+- CLI executable not found or an unknown-option error:
+  install/update the relevant CLI, or set its profile's `command` / `LLM_COMMAND` to the absolute binary path
+- CLI authentication errors:
+  check `codex login status` or `claude auth status`, then sign in through that CLI again if needed. On macOS, Claude needs access to its saved Keychain credentials. Errors reported by Claude on stdout are included in tracker error messages.
 - `json: unknown field ...` while loading config:
   your config likely uses the wrong field names or shape; check `llm.active_profile` and `llm.profiles.<name>.*`
 - `API key is required`:

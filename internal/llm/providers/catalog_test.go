@@ -147,3 +147,21 @@ func TestListModelsOllamaUsesTagsEndpoint(t *testing.T) {
 		t.Fatalf("models = %#v, want sorted Ollama tags", models)
 	}
 }
+
+func TestListModelsReturnsFixedClaudeCLIChoices(t *testing.T) {
+	t.Parallel()
+
+	models, err := ListModels(context.Background(), "claude_cli", config.LLMProfile{Provider: "claude_cli"})
+	if err != nil {
+		t.Fatalf("ListModels(claude_cli) error = %v", err)
+	}
+	want := []string{"sonnet", "opus", "haiku", "fable"}
+	if len(models) != len(want) {
+		t.Fatalf("claude_cli models = %#v, want %#v", models, want)
+	}
+	for idx := range want {
+		if models[idx] != want[idx] {
+			t.Fatalf("claude_cli models = %#v, want %#v", models, want)
+		}
+	}
+}

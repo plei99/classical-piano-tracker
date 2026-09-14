@@ -27,6 +27,10 @@ func ListModels(ctx context.Context, profileName string, profile config.LLMProfi
 		return listAnthropicModels(ctx, profile)
 	case "google":
 		return listGoogleModels(ctx, profile)
+	case "claude_cli":
+		return append([]string(nil), claudeCLIModels...), nil
+	case "codex":
+		return nil, fmt.Errorf("Codex CLI model listing is unavailable; omit model to use the CLI default or enter a model ID manually")
 	case "openai_compat":
 		switch strings.ToLower(strings.TrimSpace(profileName)) {
 		case "ollama":

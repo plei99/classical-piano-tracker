@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os/exec"
 	"slices"
 	"strings"
 
@@ -19,6 +20,18 @@ var runPianistSelection = promptPianistSelection
 var runProviderSelection = promptProviderSelection
 var runModelSelection = promptModelSelection
 var listOnboardingModels = providers.ListModels
+
+// lookupClaudeCommand resolves the Claude Code CLI on PATH so the absolute path
+// can be stored in the profile. Tests override it.
+var lookupClaudeCommand = func() (string, error) {
+	return exec.LookPath("claude")
+}
+
+var lookupCodexCommand = func() (string, error) {
+	return exec.LookPath("codex")
+}
+
+const claudeCLIProviderKind = "claude_cli"
 
 type onboardingProvider struct {
 	ProfileName    string
@@ -41,11 +54,23 @@ func onboardingProviders() []onboardingProvider {
 			PromptAPIKey: true,
 		},
 		{
+			ProfileName:  "codex",
+			DisplayName:  "Codex CLI (uses your Codex login)",
+			ProviderKind: "codex",
+		},
+		{
 			ProfileName:  "anthropic",
 			DisplayName:  "Anthropic",
 			ProviderKind: "anthropic",
 			DefaultModel: "claude-sonnet-4-5",
 			PromptAPIKey: true,
+		},
+		{
+			ProfileName:  claudeCLIProviderKind,
+			DisplayName:  "Claude Code CLI (claude -p, uses your Claude login)",
+			ProviderKind: claudeCLIProviderKind,
+			DefaultModel: "sonnet",
+			FixedModels:  providers.ClaudeCLIModels(),
 		},
 		{
 			ProfileName:  "google",
@@ -145,6 +170,23 @@ func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 				}
 			}
 
+			command := ""
+			if selectedProvider.ProviderKind == claudeCLIProviderKind || selectedProvider.ProviderKind == "codex" {
+				command = strings.TrimSpace(currentProfile.Command)
+				binary, lookup := "claude", lookupClaudeCommand
+				if selectedProvider.ProviderKind == "codex" {
+					binary, lookup = "codex", lookupCodexCommand
+				}
+				if command == "" {
+					command, err = lookup()
+					if err != nil {
+						fmt.Fprintf(writer, "\nCould not find the %s command on PATH (%v).\nInstall the CLI and sign in, or set llm.profiles.%s.command to its path.\n\n", binary, err, selectedProvider.ProfileName)
+						command = ""
+					}
+				}
+				fmt.Fprintf(writer, "Uses the CLI's existing login. Sign in with `%s` first; no tracker API key is needed.\n\n", binary)
+			}
+
 			profileForListing := config.LLMProfile{
 				Provider: selectedProvider.ProviderKind,
 				Model:    currentProfile.Model,
@@ -169,6 +211,7 @@ func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 				Model:    selectedModel,
 				APIKey:   strings.TrimSpace(apiKey),
 				BaseURL:  strings.TrimSpace(baseURL),
+				Command:  strings.TrimSpace(command),
 			})
 			cfg.PianistsAllowlist = selected
 
@@ -177,7 +220,11 @@ func newOnboardingCmd(opts *rootOptions) *cobra.Command {
 			}
 
 			cmd.Printf("\nSaved onboarding config to %s\n", configPath)
-			cmd.Printf("Selected LLM provider: %s (%s)\n", selectedProvider.DisplayName, selectedModel)
+			modelLabel := selectedModel
+			if modelLabel == "" {
+				modelLabel = "CLI default model"
+			}
+			cmd.Printf("Selected LLM provider: %s (%s)\n", selectedProvider.DisplayName, modelLabel)
 			cmd.Printf("Selected %d pianists for pianists_allowlist\n", len(selected))
 			cmd.Printf("Next steps:\n")
 			cmd.Printf("  1. Add %s to your Spotify app redirect URIs\n", "http://127.0.0.1:8000/api/auth/spotify/callback")
@@ -203,6 +250,11 @@ func initialProviderIndex(choices []onboardingProvider, cfg config.LLMConfig) in
 }
 
 func promptProviderModel(ctx context.Context, lineReader *bufio.Reader, pickerInput io.Reader, writer io.Writer, provider onboardingProvider, profile config.LLMProfile) (string, error) {
+	if provider.ProviderKind == "codex" {
+		// Codex has no simple model-list command. Avoid hardcoded choices that
+		// may not be available to the user's CLI account.
+		return promptOptionalValue(lineReader, writer, "Codex model (optional; unset uses CLI default)", profile.Model)
+	}
 	currentModel := strings.TrimSpace(profile.Model)
 	if currentModel == "" {
 		currentModel = provider.DefaultModel

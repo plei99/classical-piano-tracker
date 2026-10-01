@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // pianistSelectionModel is a deliberately small one-screen Bubble Tea model
@@ -45,7 +45,7 @@ func (m pianistSelectionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.canceled = true
@@ -58,7 +58,7 @@ func (m pianistSelectionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.pianists)-1 {
 				m.cursor++
 			}
-		case " ":
+		case "space":
 			if m.selected[m.cursor] {
 				delete(m.selected, m.cursor)
 			} else {
@@ -72,7 +72,13 @@ func (m pianistSelectionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m pianistSelectionModel) View() string {
+func (m pianistSelectionModel) View() tea.View {
+	view := tea.NewView(m.render())
+	view.AltScreen = true
+	return view
+}
+
+func (m pianistSelectionModel) render() string {
 	width := m.width
 	if width <= 0 {
 		width = 80
@@ -183,7 +189,7 @@ func (m pianistSelectionModel) selectedPianists() ([]string, error) {
 func promptPianistSelection(reader io.Reader, writer io.Writer, pianists []string) ([]string, error) {
 	model := newPianistSelectionModel(pianists)
 
-	finalModel, err := tea.NewProgram(model, tea.WithInput(reader), tea.WithOutput(writer), tea.WithAltScreen()).Run()
+	finalModel, err := tea.NewProgram(model, tea.WithInput(reader), tea.WithOutput(writer)).Run()
 	if err != nil {
 		return nil, fmt.Errorf("run pianist selection: %w", err)
 	}

@@ -2,17 +2,19 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/plei99/classical-piano-tracker/internal/db"
 	"github.com/plei99/classical-piano-tracker/internal/syncer"
 )
 
-func TestUpdateTracksLoadedTriggersRatingLoad(t *testing.T) {
+func TestUpdateTracksLoadedSelectsFirstTrackWithCachedRating(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(nil, nil, nil)
@@ -22,6 +24,7 @@ func TestUpdateTracksLoadedTriggersRatingLoad(t *testing.T) {
 			{ID: 1, TrackName: "Track One", Artists: `["Artist One"]`, LastPlayedAt: 200},
 			{ID: 2, TrackName: "Track Two", Artists: `["Artist Two"]`, LastPlayedAt: 100},
 		},
+		ratings: map[int64]db.Rating{1: {TrackID: 1, Stars: 4}},
 	}
 
 	updated, cmd := model.Update(msg)
@@ -29,14 +32,14 @@ func TestUpdateTracksLoadedTriggersRatingLoad(t *testing.T) {
 	if got.loadingTracks {
 		t.Fatal("loadingTracks should be false after tracksLoadedMsg")
 	}
-	if !got.loadingRating {
-		t.Fatal("loadingRating should be true after selecting the first track")
-	}
 	if len(got.tracks) != 3 || got.tracks[0].ID != 1 || got.tracks[1].ID != 3 || got.tracks[2].ID != 2 {
 		t.Fatalf("tracks should be sorted by recent desc, got %+v", got.tracks)
 	}
-	if cmd == nil {
-		t.Fatal("expected rating load command")
+	if rating := got.selectedRating(); rating == nil || rating.Stars != 4 {
+		t.Fatalf("selectedRating() = %+v, want cached 4-star rating", rating)
+	}
+	if cmd != nil {
+		t.Fatal("selecting a loaded track should not need a follow-up DB command")
 	}
 }
 
@@ -44,10 +47,8 @@ func TestUpdateTracksLoadedPreservesSelectedTrackAcrossReload(t *testing.T) {
 	t.Parallel()
 
 	model := Model{
-		tracks:         []db.Track{{ID: 7}, {ID: 9}},
-		selectedIndex:  1,
-		selectedRating: &db.Rating{TrackID: 9, Stars: 4},
-		ratingKnown:    true,
+		tracks:        []db.Track{{ID: 7}, {ID: 9}},
+		selectedIndex: 1,
 	}
 
 	updated, cmd := model.Update(tracksLoadedMsg{
@@ -62,42 +63,33 @@ func TestUpdateTracksLoadedPreservesSelectedTrackAcrossReload(t *testing.T) {
 		t.Fatalf("selected track after reload = %+v, want track 9", got.selectedTrack())
 	}
 	if cmd != nil {
-		t.Fatal("rating should not reload when the preserved selection already has known rating state")
+		t.Fatal("reloading tracks should not need a follow-up DB command")
 	}
 }
 
-func TestUpdateRatingLoadedIgnoresStaleTrack(t *testing.T) {
+func TestMoveSelectionReadsRatingFromCache(t *testing.T) {
 	t.Parallel()
 
 	model := Model{
-		tracks: []db.Track{{ID: 2}},
+		width:   120,
+		height:  28,
+		tracks:  []db.Track{{ID: 1, TrackName: "One", Artists: `["A"]`}, {ID: 2, TrackName: "Two", Artists: `["B"]`}},
+		ratings: map[int64]db.Rating{2: {TrackID: 2, Stars: 5, UpdatedAt: 10}},
 	}
 
-	updated, _ := model.Update(ratingLoadedMsg{
-		trackID: 1,
-		rating:  &db.Rating{TrackID: 1, Stars: 5},
-	})
+	updated, cmd := model.Update(textKey("j"))
 	got := updated.(Model)
-	if got.selectedRating != nil {
-		t.Fatal("stale rating should be ignored")
+	if cmd != nil {
+		t.Fatal("moving the selection should not issue a DB command")
 	}
-}
-
-func TestUpdateRatingLoadedHandlesNoRows(t *testing.T) {
-	t.Parallel()
-
-	model := Model{
-		tracks:        []db.Track{{ID: 2}},
-		loadingRating: true,
+	if !strings.Contains(got.View().Content, "Rating: 5/5") {
+		t.Fatalf("View() = %q, want cached rating for track 2", got.View().Content)
 	}
 
-	updated, _ := model.Update(ratingLoadedMsg{trackID: 2, rating: nil})
-	got := updated.(Model)
-	if got.loadingRating {
-		t.Fatal("loadingRating should be false after ratingLoadedMsg")
-	}
-	if !got.ratingKnown {
-		t.Fatal("ratingKnown should be true when nil rating is returned")
+	updated, _ = got.Update(textKey("k"))
+	got = updated.(Model)
+	if !strings.Contains(got.View().Content, "Rating: none") {
+		t.Fatalf("View() = %q, want no rating for track 1", got.View().Content)
 	}
 }
 
@@ -108,9 +100,8 @@ func TestSyncKeyStartsAsyncSync(t *testing.T) {
 		return syncer.Stats{Fetched: 5, Accepted: 2, Inserted: 1, Updated: 1}, nil
 	}, nil)
 	model.tracks = []db.Track{{ID: 1}}
-	model.ratingKnown = true
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	updated, cmd := model.Update(textKey("s"))
 	got := updated.(Model)
 	if !got.syncing {
 		t.Fatal("syncing should be true after pressing s")
@@ -132,10 +123,9 @@ func TestSyncFinishedReloadsTracks(t *testing.T) {
 	t.Parallel()
 
 	model := Model{
-		queries:     newTestQueries(t),
-		tracks:      []db.Track{{ID: 1}},
-		syncing:     true,
-		ratingKnown: true,
+		queries: newTestQueries(t),
+		tracks:  []db.Track{{ID: 1}},
+		syncing: true,
 	}
 
 	updated, cmd := model.Update(syncFinishedMsg{
@@ -160,9 +150,8 @@ func TestSyncFinishedErrorSetsStatus(t *testing.T) {
 	t.Parallel()
 
 	model := Model{
-		tracks:      []db.Track{{ID: 1}},
-		syncing:     true,
-		ratingKnown: true,
+		tracks:  []db.Track{{ID: 1}},
+		syncing: true,
 	}
 
 	updated, _ := model.Update(syncFinishedMsg{err: errors.New("bad token")})
@@ -189,10 +178,9 @@ func TestSortKeyCyclesOrderAndPreservesSelectedTrack(t *testing.T) {
 		},
 		sortMode:      sortModeRecentDesc,
 		selectedIndex: 1,
-		ratingKnown:   true,
 	}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	updated, _ := model.Update(textKey("o"))
 	got := updated.(Model)
 	if got.sortMode != sortModeIDAsc {
 		t.Fatalf("sortMode = %v, want sortModeIDAsc", got.sortMode)
@@ -215,27 +203,24 @@ func TestGoToTopAndBottomKeysMoveSelection(t *testing.T) {
 			{ID: 33},
 		},
 		selectedIndex: 1,
-		ratingKnown:   true,
 	}
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	updated, cmd := model.Update(textKey("g"))
 	got := updated.(Model)
 	if got.selectedIndex != 0 || got.selectedTrack() == nil || got.selectedTrack().ID != 11 {
 		t.Fatalf("after g selectedIndex=%d selectedTrack=%+v, want first track", got.selectedIndex, got.selectedTrack())
 	}
-	if !got.loadingRating || cmd == nil {
-		t.Fatal("g should trigger rating load for the first track")
+	if cmd != nil {
+		t.Fatal("g should not issue a DB command")
 	}
 
-	got.loadingRating = false
-	got.ratingKnown = true
-	updated, cmd = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	updated, cmd = got.Update(textKey("G"))
 	got = updated.(Model)
 	if got.selectedIndex != 2 || got.selectedTrack() == nil || got.selectedTrack().ID != 33 {
 		t.Fatalf("after G selectedIndex=%d selectedTrack=%+v, want last track", got.selectedIndex, got.selectedTrack())
 	}
-	if !got.loadingRating || cmd == nil {
-		t.Fatal("G should trigger rating load for the last track")
+	if cmd != nil {
+		t.Fatal("G should not issue a DB command")
 	}
 }
 
@@ -253,16 +238,15 @@ func TestSearchFiltersTracksAndEnterExitsSearchMode(t *testing.T) {
 			{ID: 2, TrackName: "Images", AlbumName: "Debussy", Artists: `["Seong-Jin Cho"]`, LastPlayedAt: 200},
 			{ID: 1, TrackName: "Etudes", AlbumName: "Ligeti", Artists: `["Yuja Wang"]`, LastPlayedAt: 100},
 		},
-		ratingKnown: true,
 	}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated, _ := model.Update(textKey("/"))
 	got := updated.(Model)
 	if !got.searching {
 		t.Fatal("searching should be true after pressing /")
 	}
 
-	updated, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("yuja")})
+	updated, cmd := got.Update(textKey("yuja"))
 	got = updated.(Model)
 	if got.searchQuery != "yuja" {
 		t.Fatalf("searchQuery = %q, want yuja", got.searchQuery)
@@ -273,11 +257,11 @@ func TestSearchFiltersTracksAndEnterExitsSearchMode(t *testing.T) {
 	if got.selectedTrack() == nil || got.selectedTrack().ID != 1 {
 		t.Fatalf("selectedTrack() = %+v, want ID 1", got.selectedTrack())
 	}
-	if cmd == nil {
-		t.Fatal("expected rating reload command after search selection changed")
+	if cmd != nil {
+		t.Fatal("search should not issue a DB command")
 	}
 
-	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got = updated.(Model)
 	if got.searching {
 		t.Fatal("searching should be false after pressing enter")
@@ -300,10 +284,9 @@ func TestSearchEscClearsFilterAndRestoresTracks(t *testing.T) {
 		tracks: []db.Track{
 			{ID: 1, TrackName: "Etudes", AlbumName: "Ligeti", Artists: `["Yuja Wang"]`, LastPlayedAt: 100},
 		},
-		ratingKnown: true,
 	}
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := model.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	got := updated.(Model)
 	if got.searching {
 		t.Fatal("searching should be false after esc")
@@ -329,10 +312,9 @@ func TestSearchNoMatchesView(t *testing.T) {
 		allTracks: []db.Track{
 			{ID: 1, TrackName: "Etudes", AlbumName: "Ligeti", Artists: `["Yuja Wang"]`, LastPlayedAt: 100},
 		},
-		ratingKnown: true,
 	}
 
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "No tracks match /zzz") {
 		t.Fatalf("View() = %q, want no-match message", view)
 	}
@@ -349,11 +331,9 @@ func TestRatingSavedResortsUnratedFirst(t *testing.T) {
 			{ID: 4, LastPlayedAt: 300},
 			{ID: 9, LastPlayedAt: 200},
 		},
-		ratedTrackIDs:  map[int64]struct{}{9: {}},
-		sortMode:       sortModeUnratedFirst,
-		selectedIndex:  0,
-		ratingKnown:    true,
-		selectedRating: nil,
+		ratings:       map[int64]db.Rating{9: {TrackID: 9, Stars: 2}},
+		sortMode:      sortModeUnratedFirst,
+		selectedIndex: 0,
 	}
 
 	updated, _ := model.Update(ratingSavedMsg{
@@ -361,7 +341,7 @@ func TestRatingSavedResortsUnratedFirst(t *testing.T) {
 		rating:  &db.Rating{TrackID: 4, Stars: 5, UpdatedAt: 10},
 	})
 	got := updated.(Model)
-	if _, ok := got.ratedTrackIDs[4]; !ok {
+	if _, ok := got.ratings[4]; !ok {
 		t.Fatal("track 4 should be marked as rated after save")
 	}
 	if got.selectedTrack() == nil || got.selectedTrack().ID != 4 {
@@ -370,18 +350,20 @@ func TestRatingSavedResortsUnratedFirst(t *testing.T) {
 	if got.tracks[0].ID != 4 || got.tracks[1].ID != 9 {
 		t.Fatalf("tracks after unrated-first resort = %+v, want selected track preserved with deterministic order", got.tracks)
 	}
+	if _, ok := model.ratings[4]; ok {
+		t.Fatal("saving should not mutate the ratings map of the previous model value")
+	}
 }
 
 func TestEnterStartsRatingEditorWithExistingRating(t *testing.T) {
 	t.Parallel()
 
 	model := Model{
-		tracks:         []db.Track{{ID: 1, TrackName: "One", Artists: `["A"]`}},
-		selectedRating: &db.Rating{TrackID: 1, Stars: 4, Opinion: "Warm"},
-		ratingKnown:    true,
+		tracks:  []db.Track{{ID: 1, TrackName: "One", Artists: `["A"]`}},
+		ratings: map[int64]db.Rating{1: {TrackID: 1, Stars: 4, Opinion: "Warm"}},
 	}
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(Model)
 	if !got.editingRating {
 		t.Fatal("editingRating should be true after pressing enter")
@@ -403,20 +385,19 @@ func TestRatingEditorHandlesInputAndSave(t *testing.T) {
 		}, nil
 	})
 	model.tracks = []db.Track{{ID: 7, TrackName: "One", Artists: `["A"]`}}
-	model.ratingKnown = true
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(Model)
 	if !got.editingRating {
 		t.Fatal("editor should open")
 	}
 
-	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	updated, _ = got.Update(textKey("5"))
 	got = updated.(Model)
-	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Great")})
+	updated, _ = got.Update(textKey("Great"))
 	got = updated.(Model)
 
-	updated, cmd := got.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got = updated.(Model)
 	if got.editingRating {
 		t.Fatal("editor should close when save starts")
@@ -441,10 +422,8 @@ func TestRatingSavedUpdatesSelection(t *testing.T) {
 	t.Parallel()
 
 	model := Model{
-		tracks:         []db.Track{{ID: 9}},
-		savingRating:   true,
-		ratingKnown:    false,
-		selectedRating: nil,
+		tracks:       []db.Track{{ID: 9}},
+		savingRating: true,
 	}
 
 	updated, _ := model.Update(ratingSavedMsg{
@@ -455,11 +434,8 @@ func TestRatingSavedUpdatesSelection(t *testing.T) {
 	if got.savingRating {
 		t.Fatal("savingRating should be false after ratingSavedMsg")
 	}
-	if got.selectedRating == nil || got.selectedRating.Stars != 3 {
-		t.Fatalf("selectedRating = %+v, want saved rating", got.selectedRating)
-	}
-	if !got.ratingKnown {
-		t.Fatal("ratingKnown should be true after a successful save")
+	if rating := got.selectedRating(); rating == nil || rating.Stars != 3 {
+		t.Fatalf("selectedRating() = %+v, want saved rating", rating)
 	}
 }
 
@@ -472,11 +448,36 @@ func TestFormatTrackArtists(t *testing.T) {
 	}
 }
 
+func TestFormatTrackArtistsMatchesJSONDecoding(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{
+		`["Frédéric Chopin","Víkingur Ólafsson"]`,
+		`["Solo"]`,
+		`["A",""]`,
+		`[""]`,
+		`["Quote \"Nickname\" Pianist","B"]`,
+		`["Tom \u0026 Jerry"]`,
+		`["Spaced", "Out"]`,
+		`[]`,
+		`not json`,
+	} {
+		want := raw
+		var artists []string
+		if err := json.Unmarshal([]byte(raw), &artists); err == nil && len(artists) > 0 {
+			want = strings.Join(artists, ", ")
+		}
+		if got := formatTrackArtists(raw); got != want {
+			t.Errorf("formatTrackArtists(%s) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
 func TestRenderErrorState(t *testing.T) {
 	t.Parallel()
 
 	model := Model{err: errors.New("boom")}
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Error: boom") {
 		t.Fatalf("View() = %q, want error text", view)
 	}
@@ -550,10 +551,9 @@ func TestViewIncludesScrollableHint(t *testing.T) {
 			{ID: 5, TrackName: "Five", Artists: `["E"]`, LastPlayedAt: 100},
 			{ID: 6, TrackName: "Six", Artists: `["F"]`, LastPlayedAt: 100},
 		},
-		ratingKnown: true,
 	}
 
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Local track history") {
 		t.Fatalf("View() = %q, want main header", view)
 	}
@@ -569,13 +569,12 @@ func TestViewShowsRatingEditor(t *testing.T) {
 		width:         120,
 		height:        28,
 		tracks:        []db.Track{{ID: 1, TrackName: "One", Artists: `["A"]`}},
-		ratingKnown:   true,
 		editingRating: true,
 		draftStars:    5,
 		draftOpinion:  "Very good",
 	}
 
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Rating Editor") {
 		t.Fatalf("View() = %q, want rating editor", view)
 	}
@@ -601,42 +600,121 @@ func TestViewFitsSmallWindowWithStatusFooter(t *testing.T) {
 				LastPlayedAt: 1780000000000000000,
 			},
 		},
-		ratingKnown:   true,
 		statusMessage: "Sync complete. fetched=10 accepted=10 inserted=0 updated=10",
 	}
 
-	view := model.View()
+	view := model.View().Content
 	if got := lipgloss.Height(view); got > model.height {
 		t.Fatalf("View() height = %d, want <= %d", got, model.height)
 	}
 }
 
-func TestLoadRatingCmdNoRows(t *testing.T) {
+func TestLoadTracksCmdReturnsRatingsByTrackID(t *testing.T) {
 	t.Parallel()
 
-	path := t.TempDir() + "/tracker.db"
-	conn, err := db.Open(path)
+	queries := newTestQueries(t)
+	ctx := context.Background()
+	track, err := queries.UpsertTrack(ctx, db.UpsertTrackParams{
+		SpotifyID: "sp-1", TrackName: "One", AlbumName: "Album", Artists: `["A"]`, LastPlayedAt: 100,
+	})
 	if err != nil {
-		t.Fatalf("db.Open() error = %v", err)
+		t.Fatalf("UpsertTrack() error = %v", err)
 	}
-	defer conn.Close()
+	if _, err := queries.UpsertRating(ctx, db.UpsertRatingParams{TrackID: track.ID, Stars: 4, Opinion: "Warm", UpdatedAt: 10}); err != nil {
+		t.Fatalf("UpsertRating() error = %v", err)
+	}
 
-	if err := db.Init(context.Background(), conn); err != nil {
-		t.Fatalf("db.Init() error = %v", err)
+	msg, ok := Model{queries: queries}.loadTracksCmd()().(tracksLoadedMsg)
+	if !ok {
+		t.Fatal("loadTracksCmd() should return tracksLoadedMsg")
 	}
+	if msg.err != nil || len(msg.tracks) != 1 {
+		t.Fatalf("unexpected tracksLoadedMsg: %+v", msg)
+	}
+	if rating := msg.ratings[track.ID]; rating.Stars != 4 || rating.Opinion != "Warm" {
+		t.Fatalf("ratings[%d] = %+v, want the saved rating", track.ID, rating)
+	}
+}
+
+func TestSearchMatchesArtistsAndAlbum(t *testing.T) {
+	t.Parallel()
 
 	model := Model{
-		queries: db.New(conn),
+		allTracks: []db.Track{
+			{ID: 1, TrackName: "Etudes", AlbumName: "Ligeti", Artists: `["Yuja Wang"]`, LastPlayedAt: 100},
+			{ID: 2, TrackName: "Nocturne", AlbumName: "Chopin: Nocturnes", Artists: `["Frédéric Chopin","Víkingur Ólafsson"]`, LastPlayedAt: 200},
+		},
+	}
+	model.trackText = buildTrackText(model.allTracks)
+
+	for _, query := range []string{"ólafsson", "NOCTURNES", "ligeti"} {
+		model.searchQuery = query
+		model.refreshTrackList(0)
+		if len(model.tracks) != 1 {
+			t.Fatalf("query %q matched %d tracks, want 1", query, len(model.tracks))
+		}
 	}
 
-	msg := model.loadRatingCmd(7)()
-	ratingMsg, ok := msg.(ratingLoadedMsg)
-	if !ok {
-		t.Fatalf("loadRatingCmd() returned %T, want ratingLoadedMsg", msg)
+	model.searchQuery = "wang ligeti"
+	model.refreshTrackList(0)
+	if len(model.tracks) != 0 {
+		t.Fatalf("query spanning two fields matched %+v, want no match", model.tracks)
 	}
-	if ratingMsg.trackID != 7 || ratingMsg.rating != nil || ratingMsg.err != nil {
-		t.Fatalf("unexpected ratingLoadedMsg: %+v", ratingMsg)
+}
+
+func TestTruncateKeepsUTF8Intact(t *testing.T) {
+	t.Parallel()
+
+	got := truncate("Víkingur Ólafsson, Frédéric Chopin", 12)
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncate() = %q, want valid UTF-8", got)
 	}
+	if w := lipgloss.Width(got); w != 12 {
+		t.Fatalf("truncate() width = %d (%q), want 12", w, got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("truncate() = %q, want ellipsis", got)
+	}
+}
+
+func TestPasteAppendsToSearchAndOpinion(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		searching: true,
+		allTracks: []db.Track{
+			{ID: 1, TrackName: "Etudes", AlbumName: "Ligeti", Artists: `["Yuja Wang"]`, LastPlayedAt: 100},
+			{ID: 2, TrackName: "Images", AlbumName: "Debussy", Artists: `["Seong-Jin Cho"]`, LastPlayedAt: 200},
+		},
+	}
+
+	updated, _ := model.Update(tea.PasteMsg{Content: "yuja"})
+	got := updated.(Model)
+	if got.searchQuery != "yuja" || len(got.tracks) != 1 || got.tracks[0].ID != 1 {
+		t.Fatalf("after paste searchQuery=%q tracks=%+v, want only the Yuja Wang track", got.searchQuery, got.tracks)
+	}
+
+	got.searching = false
+	got.editingRating = true
+	updated, _ = got.Update(tea.PasteMsg{Content: "Crystalline"})
+	got = updated.(Model)
+	if got.draftOpinion != "Crystalline" {
+		t.Fatalf("draftOpinion = %q, want pasted text", got.draftOpinion)
+	}
+}
+
+func TestViewUsesAltScreen(t *testing.T) {
+	t.Parallel()
+
+	if !(Model{loadingTracks: true}).View().AltScreen {
+		t.Fatal("View() should request the alternate screen")
+	}
+}
+
+// textKey builds the key press Bubble Tea v2 reports for typed text.
+func textKey(s string) tea.KeyPressMsg {
+	code, _ := utf8.DecodeRuneInString(s)
+	return tea.KeyPressMsg{Code: code, Text: s}
 }
 
 func newTestQueries(t *testing.T) *db.Queries {

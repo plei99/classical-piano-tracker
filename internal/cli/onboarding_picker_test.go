@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestPianistSelectionModelToggleAndSelectionOrder(t *testing.T) {
@@ -12,13 +12,13 @@ func TestPianistSelectionModelToggleAndSelectionOrder(t *testing.T) {
 
 	model := newPianistSelectionModel([]string{"A", "B", "C"})
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	model = updated.(pianistSelectionModel)
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	model = updated.(pianistSelectionModel)
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	model = updated.(pianistSelectionModel)
 
 	selected, err := model.selectedPianists()
@@ -42,7 +42,7 @@ func TestPianistSelectionModelRejectsEmptySelection(t *testing.T) {
 
 	model := newPianistSelectionModel([]string{"A"})
 
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	model = updated.(pianistSelectionModel)
 
 	if _, err := model.selectedPianists(); err == nil {
@@ -53,7 +53,7 @@ func TestPianistSelectionModelRejectsEmptySelection(t *testing.T) {
 func TestPianistSelectionModelViewIncludesControls(t *testing.T) {
 	t.Parallel()
 
-	view := newPianistSelectionModel([]string{"A", "B"}).View()
+	view := newPianistSelectionModel([]string{"A", "B"}).View().Content
 	for _, want := range []string{
 		"space: toggle",
 		"enter: confirm",
@@ -100,7 +100,7 @@ func TestPianistSelectionModelViewShowsOverflowHints(t *testing.T) {
 	model.height = 10
 	model.cursor = 3
 
-	view := model.View()
+	view := model.View().Content
 	for _, want := range []string{
 		"... 1 more above",
 		"... 3 more below",

@@ -3,17 +3,16 @@ package tui
 import (
 	"cmp"
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/plei99/classical-piano-tracker/internal/db"
 	"github.com/plei99/classical-piano-tracker/internal/syncer"
 )
@@ -77,42 +76,48 @@ var sortModeCycle = []sortMode{
 
 // Model is the root Bubble Tea model for the tracker TUI.
 type Model struct {
-	queries        *db.Queries
-	runSync        SyncFunc
-	saveRating     SaveRatingFunc
-	width          int
-	height         int
-	loadingTracks  bool
-	loadingRating  bool
-	syncing        bool
-	savingRating   bool
-	searching      bool
-	searchQuery    string
-	allTracks      []db.Track
-	tracks         []db.Track
-	ratedTrackIDs  map[int64]struct{}
-	sortMode       sortMode
-	selectedIndex  int
-	selectedRating *db.Rating
-	ratingKnown    bool
-	editingRating  bool
-	draftStars     int
-	draftOpinion   string
-	statusMessage  string
-	statusIsError  bool
-	err            error
-}
-
-type tracksLoadedMsg struct {
+	queries       *db.Queries
+	runSync       SyncFunc
+	saveRating    SaveRatingFunc
+	width         int
+	height        int
+	loadingTracks bool
+	syncing       bool
+	savingRating  bool
+	searching     bool
+	searchQuery   string
+	allTracks     []db.Track
 	tracks        []db.Track
-	ratedTrackIDs map[int64]struct{}
+	// ratings is loaded alongside the tracks so moving the selection is a map
+	// lookup rather than a DB round trip per keypress.
+	ratings map[int64]db.Rating
+	// trackText caches strings derived from each track's artists JSON so
+	// rendering and search never re-decode it per frame or per keystroke.
+	trackText map[int64]trackText
+	sortMode  sortMode
+	// allTracks is already ordered by sortedBy when sorted is true, letting
+	// search keystrokes skip a full re-sort.
+	sortedBy      sortMode
+	sorted        bool
+	selectedIndex int
+	editingRating bool
+	draftStars    int
+	draftOpinion  string
+	statusMessage string
+	statusIsError bool
 	err           error
 }
 
-type ratingLoadedMsg struct {
-	trackID int64
-	rating  *db.Rating
-	err     error
+type trackText struct {
+	artists string // display label, e.g. "Frédéric Chopin, Krystian Zimerman"
+	search  string // lowercased name, artists, and album for substring search
+}
+
+type tracksLoadedMsg struct {
+	tracks    []db.Track
+	ratings   map[int64]db.Rating
+	trackText map[int64]trackText
+	err       error
 }
 
 type syncFinishedMsg struct {
@@ -162,22 +167,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.err = nil
 		m.allTracks = msg.tracks
-		m.ratedTrackIDs = msg.ratedTrackIDs
-		return m, m.refreshTrackList(selectedTrackID)
-	case ratingLoadedMsg:
-		if m.selectedTrack() == nil || msg.trackID != m.selectedTrack().ID {
-			return m, nil
-		}
-
-		m.loadingRating = false
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-
-		m.err = nil
-		m.selectedRating = msg.rating
-		m.ratingKnown = true
+		m.ratings = msg.ratings
+		m.trackText = msg.trackText
+		m.sorted = false
+		m.refreshTrackList(selectedTrackID)
 		return m, nil
 	case syncFinishedMsg:
 		m.syncing = false
@@ -197,9 +190,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			false,
 		)
 		m.loadingTracks = true
-		m.loadingRating = false
-		m.selectedRating = nil
-		m.ratingKnown = false
 		return m, m.loadTracksCmd()
 	case ratingSavedMsg:
 		m.savingRating = false
@@ -207,23 +197,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("Save failed: "+msg.err.Error(), true)
 			return m, nil
 		}
-		if msg.rating != nil && m.selectedTrack() != nil && msg.trackID == m.selectedTrack().ID {
-			m.selectedRating = msg.rating
-			m.ratingKnown = true
-			m.loadingRating = false
-		}
 		if msg.rating != nil {
-			if m.ratedTrackIDs == nil {
-				m.ratedTrackIDs = map[int64]struct{}{}
+			// Copy before writing: Bubble Tea may still hold the previous
+			// Model value, which shares this map.
+			ratings := make(map[int64]db.Rating, len(m.ratings)+1)
+			for id, rating := range m.ratings {
+				ratings[id] = rating
 			}
-			m.ratedTrackIDs[msg.trackID] = struct{}{}
+			ratings[msg.trackID] = *msg.rating
+			m.ratings = ratings
 			if m.sortMode == sortModeUnratedFirst {
-				_ = m.refreshTrackList(msg.trackID)
+				m.sorted = false
+				m.refreshTrackList(msg.trackID)
 			}
 		}
 		m.setStatus(fmt.Sprintf("Saved %d/5 rating for track %d", msg.rating.Stars, msg.trackID), false)
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.editingRating {
 			return m.handleRatingEditorKey(msg)
 		}
@@ -231,13 +221,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSearchKey(msg)
 		}
 		return m.handleBrowsingKey(msg)
+	case tea.PasteMsg:
+		// Bubble Tea v2 delivers bracketed paste separately from key presses.
+		if m.editingRating {
+			m.draftOpinion += msg.Content
+			return m, nil
+		}
+		if m.searching {
+			m.searchQuery += msg.Content
+			m.clearStatus()
+			m.refreshTrackList(m.selectedTrackID())
+		}
+		return m, nil
 	}
 
 	return m, nil
 }
 
-// View renders a track browser with recent tracks, details, sync, and rating actions.
-func (m Model) View() string {
+// View renders the TUI in the alternate screen.
+func (m Model) View() tea.View {
+	view := tea.NewView(m.render())
+	view.AltScreen = true
+	return view
+}
+
+// render draws a track browser with recent tracks, details, sync, and rating actions.
+func (m Model) render() string {
 	if m.loadingTracks {
 		return appStyle.Render(titleStyle.Render("Classical Piano Tracker") + "\n\nLoading local tracks...")
 	}
@@ -268,8 +277,8 @@ func (m Model) View() string {
 	}
 
 	layout := m.layout()
-	listPane := listPaneStyle.Width(layout.listWidth).Height(layout.listHeight).Render(m.renderList(layout.listWidth, layout.listHeight))
-	detailPane := detailPaneStyle.Width(layout.detailWidth).Height(layout.detailHeight).Render(m.renderDetails(layout.detailWidth, layout.detailHeight))
+	listPane := renderPane(listPaneStyle, layout.listWidth, layout.listHeight, m.renderList(layout.listWidth, layout.listHeight))
+	detailPane := renderPane(detailPaneStyle, layout.detailWidth, layout.detailHeight, m.renderDetails(layout.detailWidth, layout.detailHeight))
 
 	var body string
 	if layout.vertical {
@@ -284,6 +293,15 @@ func (m Model) View() string {
 			body + "\n\n" +
 			m.footerView(),
 	)
+}
+
+// renderPane sizes a bordered pane by its inner box. Lip Gloss v2 counts the
+// border inside Width/Height, so it is added back to keep layout() unchanged.
+func renderPane(style lipgloss.Style, width int, height int, content string) string {
+	return style.
+		Width(width + style.GetHorizontalBorderSize()).
+		Height(height + style.GetVerticalBorderSize()).
+		Render(content)
 }
 
 type layout struct {
@@ -379,7 +397,7 @@ func (m Model) renderList(width int, height int) string {
 	for idx, track := range visibleTracks {
 		absoluteIndex := offset + idx
 		line := fmt.Sprintf("%2d  %s", track.ID, truncate(track.TrackName, titleWidth))
-		subtitle := mutedStyle.Render(fmt.Sprintf("    %s", truncate(formatTrackArtists(track.Artists), artistWidth)))
+		subtitle := mutedStyle.Render(fmt.Sprintf("    %s", truncate(m.textFor(track).artists, artistWidth)))
 
 		if absoluteIndex == m.selectedIndex {
 			lines = append(lines, selectedRowStyle.Render(line))
@@ -409,7 +427,7 @@ func (m Model) renderDetails(width int, height int) string {
 			titleStyle.Render("Rating Editor"),
 			"",
 			highlightStyle.Render(truncate(track.TrackName, max(16, width-2))),
-			mutedStyle.Render(truncate(formatTrackArtists(track.Artists), max(16, width-2))),
+			mutedStyle.Render(truncate(m.textFor(*track).artists, max(16, width-2))),
 			"",
 			fmt.Sprintf("Stars: %s", m.ratingDraftStarsLabel()),
 			"Opinion:",
@@ -425,7 +443,7 @@ func (m Model) renderDetails(width int, height int) string {
 		titleStyle.Render("Track Details"),
 		"",
 		highlightStyle.Render(truncate(track.TrackName, max(16, width-2))),
-		mutedStyle.Render(truncate(formatTrackArtists(track.Artists), max(16, width-2))),
+		mutedStyle.Render(truncate(m.textFor(*track).artists, max(16, width-2))),
 		"",
 		fmt.Sprintf("ID: %d", track.ID),
 		truncate(fmt.Sprintf("Spotify ID: %s", track.SpotifyID), max(16, width-2)),
@@ -434,23 +452,20 @@ func (m Model) renderDetails(width int, height int) string {
 		truncate(fmt.Sprintf("Last Played: %s", time.Unix(track.LastPlayedAt, 0).Format(time.RFC3339)), max(16, width-2)),
 	}
 
+	rating := m.selectedRating()
 	switch {
 	case m.savingRating:
 		lines = append(lines, "", mutedStyle.Render("Rating: saving..."))
-	case m.loadingRating:
-		lines = append(lines, "", mutedStyle.Render("Rating: loading..."))
-	case !m.ratingKnown:
-		lines = append(lines, "", mutedStyle.Render("Rating: unknown"))
-	case m.selectedRating == nil:
+	case rating == nil:
 		lines = append(lines, "", mutedStyle.Render("Rating: none"))
 	default:
-		lines = append(lines, "", fmt.Sprintf("Rating: %d/5", m.selectedRating.Stars))
-		if m.selectedRating.Opinion != "" {
-			lines = append(lines, trimLines(wrapText(fmt.Sprintf("Opinion: %s", m.selectedRating.Opinion), max(16, width-2)), 3)...)
+		lines = append(lines, "", fmt.Sprintf("Rating: %d/5", rating.Stars))
+		if rating.Opinion != "" {
+			lines = append(lines, trimLines(wrapText(fmt.Sprintf("Opinion: %s", rating.Opinion), max(16, width-2)), 3)...)
 		}
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf(
 			"Updated: %s",
-			time.Unix(m.selectedRating.UpdatedAt, 0).Format(time.RFC3339),
+			time.Unix(rating.UpdatedAt, 0).Format(time.RFC3339),
 		)))
 	}
 
@@ -458,15 +473,12 @@ func (m Model) renderDetails(width int, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) handleBrowsingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleBrowsingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "r":
 		m.loadingTracks = true
-		m.loadingRating = false
-		m.selectedRating = nil
-		m.ratingKnown = false
 		m.err = nil
 		m.clearStatus()
 		return m, m.loadTracksCmd()
@@ -501,9 +513,10 @@ func (m Model) handleBrowsingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.searchQuery = ""
 		m.clearStatus()
-		return m, m.refreshTrackList(m.selectedTrackID())
+		m.refreshTrackList(m.selectedTrackID())
+		return m, nil
 	case "e", "enter":
-		if m.selectedTrack() == nil || m.loadingRating || m.savingRating {
+		if m.selectedTrack() == nil || m.savingRating {
 			return m, nil
 		}
 		m.startRatingEditor()
@@ -533,7 +546,7 @@ func (m Model) handleBrowsingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -545,36 +558,41 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searching = false
 		m.searchQuery = ""
 		m.clearStatus()
-		return m, m.refreshTrackList(m.selectedTrackID())
+		m.refreshTrackList(m.selectedTrackID())
+		return m, nil
 	case "backspace":
 		if m.searchQuery != "" {
 			_, size := utf8.DecodeLastRuneInString(m.searchQuery)
 			m.searchQuery = m.searchQuery[:len(m.searchQuery)-size]
 		}
 		m.clearStatus()
-		return m, m.refreshTrackList(m.selectedTrackID())
+		m.refreshTrackList(m.selectedTrackID())
+		return m, nil
 	case "ctrl+u":
 		m.searchQuery = ""
 		m.clearStatus()
-		return m, m.refreshTrackList(m.selectedTrackID())
+		m.refreshTrackList(m.selectedTrackID())
+		return m, nil
 	}
 
-	if msg.Type == tea.KeySpace {
+	if msg.Code == tea.KeySpace {
 		m.searchQuery += " "
 		m.clearStatus()
-		return m, m.refreshTrackList(m.selectedTrackID())
+		m.refreshTrackList(m.selectedTrackID())
+		return m, nil
 	}
 
-	if msg.Type == tea.KeyRunes {
-		m.searchQuery += string(msg.Runes)
+	if msg.Text != "" {
+		m.searchQuery += msg.Text
 		m.clearStatus()
-		return m, m.refreshTrackList(m.selectedTrackID())
+		m.refreshTrackList(m.selectedTrackID())
+		return m, nil
 	}
 
 	return m, nil
 }
 
-func (m Model) handleRatingEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleRatingEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.editingRating = false
@@ -609,17 +627,17 @@ func (m Model) handleRatingEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.draftOpinion = ""
 		return m, nil
 	case "1", "2", "3", "4", "5":
-		m.draftStars = int(msg.Runes[0] - '0')
+		m.draftStars = int(msg.Code - '0')
 		return m, nil
 	}
 
-	if msg.Type == tea.KeySpace {
+	if msg.Code == tea.KeySpace {
 		m.draftOpinion += " "
 		return m, nil
 	}
 
-	if msg.Type == tea.KeyRunes {
-		m.draftOpinion += string(msg.Runes)
+	if msg.Text != "" {
+		m.draftOpinion += msg.Text
 		return m, nil
 	}
 
@@ -632,6 +650,19 @@ func (m Model) selectedTrack() *db.Track {
 	}
 
 	return &m.tracks[m.selectedIndex]
+}
+
+// selectedRating returns the saved rating for the selected track, if any.
+func (m Model) selectedRating() *db.Rating {
+	track := m.selectedTrack()
+	if track == nil {
+		return nil
+	}
+	rating, ok := m.ratings[track.ID]
+	if !ok {
+		return nil
+	}
+	return &rating
 }
 
 func (m Model) selectedTrackID() int64 {
@@ -658,11 +689,8 @@ func (m Model) moveSelectionTo(index int) (tea.Model, tea.Cmd) {
 	}
 
 	m.selectedIndex = index
-	m.loadingRating = true
-	m.selectedRating = nil
-	m.ratingKnown = false
 	m.clearStatus()
-	return m, m.loadRatingCmd(m.selectedTrack().ID)
+	return m, nil
 }
 
 func (m Model) loadTracksCmd() tea.Cmd {
@@ -677,26 +705,13 @@ func (m Model) loadTracksCmd() tea.Cmd {
 			return tracksLoadedMsg{err: err}
 		}
 
-		ratedTrackIDs := make(map[int64]struct{}, len(ratings))
+		ratingsByTrackID := make(map[int64]db.Rating, len(ratings))
 		for _, rating := range ratings {
-			ratedTrackIDs[rating.TrackID] = struct{}{}
+			ratingsByTrackID[rating.TrackID] = rating
 		}
 
-		return tracksLoadedMsg{tracks: tracks, ratedTrackIDs: ratedTrackIDs}
-	}
-}
-
-func (m Model) loadRatingCmd(trackID int64) tea.Cmd {
-	return func() tea.Msg {
-		rating, err := m.queries.GetRatingByTrackID(context.Background(), trackID)
-		switch {
-		case err == nil:
-			return ratingLoadedMsg{trackID: trackID, rating: &rating}
-		case errors.Is(err, sql.ErrNoRows):
-			return ratingLoadedMsg{trackID: trackID, rating: nil}
-		default:
-			return ratingLoadedMsg{trackID: trackID, err: err}
-		}
+		// Decoding artists JSON here keeps it off the Update loop.
+		return tracksLoadedMsg{tracks: tracks, ratings: ratingsByTrackID, trackText: buildTrackText(tracks)}
 	}
 }
 
@@ -725,9 +740,9 @@ func (m Model) saveRatingCmd(trackID int64, stars int, opinion string) tea.Cmd {
 func (m *Model) startRatingEditor() {
 	m.editingRating = true
 	m.clearStatus()
-	if m.selectedRating != nil {
-		m.draftStars = int(m.selectedRating.Stars)
-		m.draftOpinion = m.selectedRating.Opinion
+	if rating := m.selectedRating(); rating != nil {
+		m.draftStars = int(rating.Stars)
+		m.draftOpinion = rating.Opinion
 		return
 	}
 
@@ -791,6 +806,16 @@ func (m Model) draftOpinionCursorLine() string {
 }
 
 func formatTrackArtists(raw string) string {
+	// Fast path for the compact form json.Marshal writes during sync: with no
+	// escapes, `["A","B"]` decodes to exactly the text between the quotes.
+	if inner, ok := strings.CutPrefix(raw, `["`); ok && !strings.Contains(raw, `\`) {
+		if inner, ok = strings.CutSuffix(inner, `"]`); ok && inner != "" {
+			if joined := strings.ReplaceAll(inner, `","`, ", "); !strings.Contains(joined, `"`) {
+				return joined
+			}
+		}
+	}
+
 	var artists []string
 	if err := json.Unmarshal([]byte(raw), &artists); err != nil || len(artists) == 0 {
 		return raw
@@ -816,7 +841,7 @@ func (m *Model) cycleSortMode() {
 		m.sortMode = sortModeCycle[(currentIndex+1)%len(sortModeCycle)]
 	}
 
-	_ = m.refreshTrackList(selectedTrackID)
+	m.refreshTrackList(selectedTrackID)
 }
 
 func (m *Model) sortTracks() {
@@ -826,56 +851,38 @@ func (m *Model) sortTracks() {
 	case sortModeTopPlayed:
 		sortTracksByTopPlayed(m.allTracks)
 	case sortModeUnratedFirst:
-		sortTracksByUnratedFirst(m.allTracks, m.ratedTrackIDs)
+		sortTracksByUnratedFirst(m.allTracks, m.ratings)
 	default:
 		m.sortMode = sortModeRecentDesc
 		sortTracksByRecentDesc(m.allTracks)
 	}
+	m.sortedBy = m.sortMode
+	m.sorted = true
 }
 
-func (m *Model) refreshTrackList(selectedTrackID int64) tea.Cmd {
+func (m *Model) refreshTrackList(selectedTrackID int64) {
 	if len(m.allTracks) == 0 && len(m.tracks) > 0 {
 		m.allTracks = append([]db.Track(nil), m.tracks...)
+		m.sorted = false
 	}
 
-	m.sortTracks()
-	m.tracks = filterTracks(m.allTracks, m.searchQuery)
+	if !m.sorted || m.sortedBy != m.sortMode {
+		m.sortTracks()
+	}
+	m.tracks = m.filterTracks(m.allTracks, m.searchQuery)
 	if len(m.tracks) == 0 {
 		m.selectedIndex = 0
-		m.selectedRating = nil
-		m.loadingRating = false
-		m.ratingKnown = true
 		m.editingRating = false
-		return nil
+		return
 	}
 
 	if idx := indexOfTrackID(m.tracks, selectedTrackID); idx >= 0 {
 		m.selectedIndex = idx
-	} else {
-		m.selectedIndex = 0
-		m.selectedRating = nil
-		m.loadingRating = true
-		m.ratingKnown = false
-		m.editingRating = false
-		return m.loadRatingCmd(m.selectedTrack().ID)
+		return
 	}
 
-	if !m.ratingKnown {
-		m.selectedRating = nil
-		m.loadingRating = true
-		m.editingRating = false
-		return m.loadRatingCmd(m.selectedTrack().ID)
-	}
-
-	if m.selectedRating != nil && m.selectedRating.TrackID != m.selectedTrack().ID {
-		m.selectedRating = nil
-		m.loadingRating = true
-		m.ratingKnown = false
-		m.editingRating = false
-		return m.loadRatingCmd(m.selectedTrack().ID)
-	}
-
-	return nil
+	m.selectedIndex = 0
+	m.editingRating = false
 }
 
 func (m Model) trackListSummary() string {
@@ -936,10 +943,10 @@ func sortTracksByTopPlayed(tracks []db.Track) {
 	})
 }
 
-func sortTracksByUnratedFirst(tracks []db.Track, ratedTrackIDs map[int64]struct{}) {
+func sortTracksByUnratedFirst(tracks []db.Track, ratings map[int64]db.Rating) {
 	slices.SortFunc(tracks, func(left db.Track, right db.Track) int {
-		_, leftRated := ratedTrackIDs[left.ID]
-		_, rightRated := ratedTrackIDs[right.ID]
+		_, leftRated := ratings[left.ID]
+		_, rightRated := ratings[right.ID]
 		if leftRated != rightRated {
 			if leftRated {
 				return 1
@@ -953,15 +960,17 @@ func sortTracksByUnratedFirst(tracks []db.Track, ratedTrackIDs map[int64]struct{
 	})
 }
 
-func filterTracks(tracks []db.Track, query string) []db.Track {
+func (m Model) filterTracks(tracks []db.Track, query string) []db.Track {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
-		return append([]db.Track(nil), tracks...)
+		// Sharing the backing array is safe: allTracks is only re-sorted
+		// inside refreshTrackList, which always reassigns tracks afterwards.
+		return tracks
 	}
 
 	matches := make([]db.Track, 0, len(tracks))
 	for _, track := range tracks {
-		if trackMatchesSearchQuery(track, query) {
+		if strings.Contains(m.textFor(track).search, query) {
 			matches = append(matches, track)
 		}
 	}
@@ -969,10 +978,30 @@ func filterTracks(tracks []db.Track, query string) []db.Track {
 	return matches
 }
 
-func trackMatchesSearchQuery(track db.Track, query string) bool {
-	return strings.Contains(strings.ToLower(track.TrackName), query) ||
-		strings.Contains(strings.ToLower(formatTrackArtists(track.Artists)), query) ||
-		strings.Contains(strings.ToLower(track.AlbumName), query)
+func buildTrackText(tracks []db.Track) map[int64]trackText {
+	texts := make(map[int64]trackText, len(tracks))
+	for _, track := range tracks {
+		texts[track.ID] = newTrackText(track)
+	}
+	return texts
+}
+
+func newTrackText(track db.Track) trackText {
+	artists := formatTrackArtists(track.Artists)
+	return trackText{
+		artists: artists,
+		// NUL separators keep a pasted query from matching across fields.
+		search: strings.ToLower(track.TrackName + "\x00" + artists + "\x00" + track.AlbumName),
+	}
+}
+
+// textFor falls back to decoding on a cache miss so hand-built models (tests)
+// behave the same as loaded ones.
+func (m Model) textFor(track db.Track) trackText {
+	if text, ok := m.trackText[track.ID]; ok {
+		return text
+	}
+	return newTrackText(track)
 }
 
 func indexOfTrackID(tracks []db.Track, trackID int64) int {
@@ -992,10 +1021,11 @@ func truncate(value string, width int) string {
 	if lipgloss.Width(value) <= width {
 		return value
 	}
+	// Cut by terminal cells, not bytes, so accented names stay valid UTF-8.
 	if width <= 3 {
-		return value[:width]
+		return ansi.Truncate(value, width, "")
 	}
-	return value[:width-3] + "..."
+	return ansi.Truncate(value, width, "...")
 }
 
 func wrapText(value string, width int) []string {

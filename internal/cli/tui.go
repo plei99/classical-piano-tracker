@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/plei99/classical-piano-tracker/internal/config"
 	"github.com/plei99/classical-piano-tracker/internal/db"
 	"github.com/plei99/classical-piano-tracker/internal/spotify"
@@ -43,7 +43,10 @@ func newTUICmd(opts *rootOptions) *cobra.Command {
 				newTUISyncFunc(configPath, queries),
 				newTUISaveRatingFunc(queries),
 			)
-			program := tea.NewProgram(model, tea.WithAltScreen())
+			// Bubble Tea only flushes frames on its renderer tick, so the
+			// frame rate bounds keypress latency. 120 is the library's cap;
+			// ticks with no new frame are skipped cheaply.
+			program := tea.NewProgram(model, tea.WithFPS(120))
 			if _, err := program.Run(); err != nil {
 				return fmt.Errorf("run tracker TUI: %w", err)
 			}

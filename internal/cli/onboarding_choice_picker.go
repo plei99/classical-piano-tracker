@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 type singleChoiceModel struct {
@@ -39,7 +39,7 @@ func (m singleChoiceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.canceled = true
@@ -59,7 +59,13 @@ func (m singleChoiceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m singleChoiceModel) View() string {
+func (m singleChoiceModel) View() tea.View {
+	view := tea.NewView(m.render())
+	view.AltScreen = true
+	return view
+}
+
+func (m singleChoiceModel) render() string {
 	width := m.width
 	if width <= 0 {
 		width = 80
@@ -136,7 +142,7 @@ func runSingleChoiceSelection(reader io.Reader, writer io.Writer, title string, 
 		return "", fmt.Errorf("single-choice selection requires at least one option")
 	}
 	model := newSingleChoiceModel(title, help, options, initial)
-	finalModel, err := tea.NewProgram(model, tea.WithInput(reader), tea.WithOutput(writer), tea.WithAltScreen()).Run()
+	finalModel, err := tea.NewProgram(model, tea.WithInput(reader), tea.WithOutput(writer)).Run()
 	if err != nil {
 		return "", fmt.Errorf("run selection %q: %w", title, err)
 	}

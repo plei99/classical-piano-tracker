@@ -1,0 +1,27 @@
+
+ Classical Piano Tracker
+ Local track history
+
+ ╭────────────────────────────────────────╮╭─────────────────────────────────────────────────────────────────────╮
+ │                                        ││                                                                     │
+ │ Tracks                                 ││ Track Details                                                       │
+ │ 30 loaded · sort: recent               ││                                                                     │
+ │                                        ││ Track 28                                                            │
+ │ 30  Track 30                           ││ Frédéric Chopin, Pianist 27                                         │
+ │     Frédéric Chopin, Pianist 29        ││                                                                     │
+ │ 29  Track 29                           ││ ID: 28                                                              │
+ │     Frédéric Chopin, Pianist 28        ││ Spotify ID: sp-27                                                   │
+ │  28  Track 28                          ││ Album: Album                                                        │
+ │      Frédéric Chopin, Pianist 27       ││ Play Count: 3                                                       │
+ │ 27  Track 27                           ││ Last Played: 2023-11-14T22:13:47Z                                   │
+ │     Frédéric Chopin, Pianist 26        ││                                                                     │
+ │ 26  Track 26                           ││ Rating: 4/5                                                         │
+ │     Frédéric Chopin, Pianist 25        ││ Opinion: Lyrical and restrained, with a long singing line that goes │
+ │ 25  Track 25                           ││ on and on across the whole movement.                                │
+ │     Frédéric Chopin, Pianist 24        ││ Updated: 2023-11-14T22:13:20Z                                       │
+ │ ... 24 more                            ││                                                                     │
+ │                                        ││                                                                     │
+ │                                        ││                                                                     │
+ ╰────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────────╯
+
+ j/k or arrows: move   g/G: top/bottom   o: sort   s: sync   enter/e: rate   r: reload   q: quit

@@ -1,0 +1,29 @@
+
+ Classical Piano Tracker
+ Local track history
+
+ ╭────────────────────────────────────────╮╭─────────────────────────────────────────────────╮
+ │                                        ││                                                 │
+ │ Tracks                                 ││ Track Details                                   │
+ │ 5 loaded · sort: recent                ││                                                 │
+ │                                        ││ Track 5                                         │
+ │   5  Track 5                           ││ Frédéric Chopin, Pianist 4                      │
+ │      Frédéric Chopin, Pianist 4        ││                                                 │
+ │  4  Track 4                            ││ ID: 5                                           │
+ │     Frédéric Chopin, Pianist 3         ││ Spotify ID: sp-4                                │
+ │  3  Track 3                            ││ Album: Album                                    │
+ │     Frédéric Chopin, Pianist 2         ││ Play Count: 5                                   │
+ │  2  Track 2                            ││ Last Played: 2023-11-14T22:13:24Z               │
+ │     Frédéric Chopin, Pianist 1         ││                                                 │
+ │  1  Track 1                            ││ Rating: none                                    │
+ │     Frédéric Chopin, Pianist 0         ││                                                 │
+ │                                        ││                                                 │
+ │                                        ││                                                 │
+ │                                        ││                                                 │
+ │                                        ││                                                 │
+ │                                        ││                                                 │
+ │                                        ││                                                 │
+ ╰────────────────────────────────────────╯╰─────────────────────────────────────────────────╯
+
+ Error: Sync failed: bad token
+ j/k or arrows: move   g/G: top/bottom   o: sort   s: sync   enter/e: rate   r: reload   q: quit

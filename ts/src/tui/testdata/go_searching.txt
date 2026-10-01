@@ -1,0 +1,27 @@
+
+ Classical Piano Tracker
+ Local track history
+
+ ╭────────────────────────────────────────╮╭─────────────────────────────────────────────────────────────────────╮
+ │                                        ││                                                                     │
+ │ Tracks                                 ││ Track Details                                                       │
+ │ 1/5 shown · sort: recent               ││                                                                     │
+ │                                        ││ Track 3                                                             │
+ │   3  Track 3                           ││ Frédéric Chopin, Pianist 2                                          │
+ │      Frédéric Chopin, Pianist 2        ││                                                                     │
+ │                                        ││ ID: 3                                                               │
+ │                                        ││ Spotify ID: sp-2                                                    │
+ │                                        ││ Album: Album                                                        │
+ │                                        ││ Play Count: 3                                                       │
+ │                                        ││ Last Played: 2023-11-14T22:13:22Z                                   │
+ │                                        ││                                                                     │
+ │                                        ││ Rating: none                                                        │
+ │                                        ││                                                                     │
+ │                                        ││                                                                     │
+ │                                        ││                                                                     │
+ │                                        ││                                                                     │
+ │                                        ││                                                                     │
+ ╰────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────────╯
+
+ Search /track 3_ (1/5)
+ type: search   backspace: delete   enter: apply   esc: clear

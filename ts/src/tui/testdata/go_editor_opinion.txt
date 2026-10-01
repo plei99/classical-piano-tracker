@@ -1,0 +1,27 @@
+
+ Classical Piano Tracker
+ Local track history
+
+ ╭────────────────────────────────────────╮╭─────────────────────────────────────────────────────────────────────╮
+ │                                        ││                                                                     │
+ │ Tracks                                 ││ Rating Editor                                                       │
+ │ 5 loaded · sort: recent                ││                                                                     │
+ │                                        ││ Track 5                                                             │
+ │   5  Track 5                           ││ Frédéric Chopin, Pianist 4                                          │
+ │      Frédéric Chopin, Pianist 4        ││                                                                     │
+ │  4  Track 4                            ││   Stars: 4/5                                                        │
+ │     Frédéric Chopin, Pianist 3         ││ > Opinion:                                                          │
+ │  3  Track 3                            ││ Op. 10_                                                             │
+ │     Frédéric Chopin, Pianist 2         ││                                                                     │
+ │  2  Track 2                            ││ 1-5 sets stars, then type your opinion.                             │
+ │     Frédéric Chopin, Pianist 1         ││ Tab switches field. Enter saves. Esc cancels.                       │
+ │  1  Track 1                            ││                                                                     │
+ │     Frédéric Chopin, Pianist 0         ││                                                                     │
+ │                                        ││                                                                     │
+ │                                        ││                                                                     │
+ │                                        ││                                                                     │
+ │                                        ││                                                                     │
+ │                                        ││                                                                     │
+ ╰────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────────╯
+
+ 1-5: stars   tab: switch field   ctrl+u: clear opinion   enter: save   esc: cancel

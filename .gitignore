@@ -67,3 +67,7 @@ backend/tracker.db-*
 
 # Go build output
 /tracker
+
+# TypeScript rewrite
+/ts/node_modules/
+/ts/dist/

@@ -1,0 +1,23 @@
+
+ Classical Piano Tracker
+ Local track history
+
+ ╭────────────────────────────────────────────────────────────────╮
+ │                                                                │
+ │ Tracks                                                         │
+ │ 30 loaded · sort: recent                                       │
+ │                                                                │
+ │  30  Track 30                                                  │
+ │      Frédéric Chopin, Pianist 29                               │
+ │ ... 29 more                                                    │
+ │                                                                │
+ ╰────────────────────────────────────────────────────────────────╯
+ ╭────────────────────────────────────────────────────────────────╮
+ │                                                                │
+
+ Error: Sync failed: spotify: HTTP 503: upstream connect error or
+ disconnect/reset before headers. reset reason:
+ connection_termination_and_a_very_long_unbroken_token_that_must_spli
+ t
+ j/k or arrows: move   g/G: top/bottom   o: sort   s: sync
+ enter/e: rate   r: reload   q: quit

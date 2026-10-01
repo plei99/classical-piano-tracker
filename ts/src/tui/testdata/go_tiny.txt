@@ -1,0 +1,8 @@
+
+ Classical Piano Tracker
+ Local track history
+
+ j/k or arrows: move
+ g/G: top/bottom   o: sort
+ s: sync   enter/e: rate
+ r: reload   q: quit

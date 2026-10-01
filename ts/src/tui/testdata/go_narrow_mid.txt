@@ -1,0 +1,23 @@
+
+ Classical Piano Tracker
+ Local track history
+
+ ╭────────────────────────────────────────────────────────────────╮
+ │                                                                │
+ │ Tracks                                                         │
+ │ 30 loaded · sort: recent                                       │
+ │                                                                │
+ │ ... 10 earlier                                                 │
+ │  20  Piano Sonata No. 20 in B-flat minor, Op. 20: II. Sche...  │
+ │      Frédéric Chopin, Pianist 19                               │
+ │ ... 19 more                                                    │
+ │                                                                │
+ ╰────────────────────────────────────────────────────────────────╯
+ ╭────────────────────────────────────────────────────────────────╮
+ │                                                                │
+ │ Track Details                                                  │
+ │                                                                │
+ │ Piano Sonata No. 20 in B-flat minor, Op. 20: II. Scherzo – ... │
+
+ j/k or arrows: move   g/G: top/bottom   o: sort   s: sync
+ enter/e: rate   r: reload   q: quit

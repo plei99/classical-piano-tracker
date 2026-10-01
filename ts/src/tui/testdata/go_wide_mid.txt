@@ -1,0 +1,27 @@
+
+ Classical Piano Tracker
+ Local track history
+
+ ╭────────────────────────────────────────╮╭─────────────────────────────────────────────────────────────────────╮
+ │                                        ││                                                                     │
+ │ Tracks                                 ││ Track Details                                                       │
+ │ 30 loaded · sort: recent               ││                                                                     │
+ │                                        ││ Track 15                                                            │
+ │ ... 12 earlier                         ││ Frédéric Chopin, Pianist 14                                         │
+ │ 18  Track 18                           ││                                                                     │
+ │     Frédéric Chopin, Pianist 17        ││ ID: 15                                                              │
+ │ 17  Track 17                           ││ Spotify ID: sp-14                                                   │
+ │     Frédéric Chopin, Pianist 16        ││ Album: Album                                                        │
+ │ 16  Track 16                           ││ Play Count: 5                                                       │
+ │     Frédéric Chopin, Pianist 15        ││ Last Played: 2023-11-14T22:13:34Z                                   │
+ │  15  Track 15                          ││                                                                     │
+ │      Frédéric Chopin, Pianist 14       ││ Rating: none                                                        │
+ │ 14  Track 14                           ││                                                                     │
+ │     Frédéric Chopin, Pianist 13        ││                                                                     │
+ │ 13  Track 13                           ││                                                                     │
+ │     Frédéric Chopin, Pianist 12        ││                                                                     │
+ │ ... 12 more                            ││                                                                     │
+ │                                        ││                                                                     │
+ ╰────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────────╯
+
+ j/k or arrows: move   g/G: top/bottom   o: sort   s: sync   enter/e: rate   r: reload   q: quit

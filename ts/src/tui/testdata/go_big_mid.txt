@@ -1,0 +1,47 @@
+
+ Classical Piano Tracker
+ Local track history
+
+ ╭────────────────────────────────────────╮╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │                                        ││                                                                                                             │
+ │ Tracks                                 ││ Track Details                                                                                               │
+ │ 300 loaded · sort: recent              ││                                                                                                             │
+ │                                        ││ Piano Sonata No. 22 in B-flat minor, Op. 30: II. Scherzo – Più lento                                        │
+ │ ... 142 earlier                        ││ Frédéric Chopin, Pianist 149                                                                                │
+ │ 158  Piano Sonata No. 30 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 157       ││ ID: 150                                                                                                     │
+ │ 157  Piano Sonata No. 29 in B-flat...  ││ Spotify ID: sp-149                                                                                          │
+ │     Frédéric Chopin, Pianist 156       ││ Album: Album                                                                                                │
+ │ 156  Piano Sonata No. 28 in B-flat...  ││ Play Count: 5                                                                                               │
+ │     Frédéric Chopin, Pianist 155       ││ Last Played: 2023-11-14T22:15:49Z                                                                           │
+ │ 155  Piano Sonata No. 27 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 154       ││ Rating: none                                                                                                │
+ │ 154  Piano Sonata No. 26 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 153       ││                                                                                                             │
+ │ 153  Piano Sonata No. 25 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 152       ││                                                                                                             │
+ │ 152  Piano Sonata No. 24 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 151       ││                                                                                                             │
+ │ 151  Piano Sonata No. 23 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 150       ││                                                                                                             │
+ │  150  Piano Sonata No. 22 in B-flat... ││                                                                                                             │
+ │      Frédéric Chopin, Pianist 149      ││                                                                                                             │
+ │ 149  Piano Sonata No. 21 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 148       ││                                                                                                             │
+ │ 148  Piano Sonata No. 20 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 147       ││                                                                                                             │
+ │ 147  Piano Sonata No. 19 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 146       ││                                                                                                             │
+ │ 146  Piano Sonata No. 18 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 145       ││                                                                                                             │
+ │ 145  Piano Sonata No. 17 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 144       ││                                                                                                             │
+ │ 144  Piano Sonata No. 16 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 143       ││                                                                                                             │
+ │ 143  Piano Sonata No. 15 in B-flat...  ││                                                                                                             │
+ │     Frédéric Chopin, Pianist 142       ││                                                                                                             │
+ │ ... 142 more                           ││                                                                                                             │
+ │                                        ││                                                                                                             │
+ ╰────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ j/k or arrows: move   g/G: top/bottom   o: sort   s: sync   enter/e: rate   r: reload   q: quit

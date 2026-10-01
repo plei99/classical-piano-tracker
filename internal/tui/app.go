@@ -20,12 +20,11 @@ import (
 const (
 	minPaneContentHeight   = 8
 	verticalLayoutWidthCut = 90
+	// appPadding is the blank margin around the whole frame, in cells.
+	appPadding = 1
 )
 
 var (
-	appStyle = lipgloss.NewStyle().
-			Padding(1)
-
 	titleStyle = lipgloss.NewStyle().
 			Bold(true)
 
@@ -101,11 +100,14 @@ type Model struct {
 	sorted        bool
 	selectedIndex int
 	editingRating bool
-	draftStars    int
-	draftOpinion  string
-	statusMessage string
-	statusIsError bool
-	err           error
+	// editingOpinion moves focus from the stars field to the opinion, where
+	// digits are ordinary text instead of star ratings.
+	editingOpinion bool
+	draftStars     int
+	draftOpinion   string
+	statusMessage  string
+	statusIsError  bool
+	err            error
 }
 
 type trackText struct {
@@ -225,6 +227,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Bubble Tea v2 delivers bracketed paste separately from key presses.
 		if m.editingRating {
 			m.draftOpinion += msg.Content
+			m.editingOpinion = true
 			return m, nil
 		}
 		if m.searching {
@@ -248,11 +251,11 @@ func (m Model) View() tea.View {
 // render draws a track browser with recent tracks, details, sync, and rating actions.
 func (m Model) render() string {
 	if m.loadingTracks {
-		return appStyle.Render(titleStyle.Render("Classical Piano Tracker") + "\n\nLoading local tracks...")
+		return padFrame(titleStyle.Render("Classical Piano Tracker") + "\n\nLoading local tracks...")
 	}
 
 	if m.err != nil {
-		return appStyle.Render(
+		return padFrame(
 			titleStyle.Render("Classical Piano Tracker") + "\n\n" +
 				errorStyle.Render("Error: "+m.err.Error()) + "\n\n" +
 				statusBarStyle.Render("Press r to retry or q to quit."),
@@ -260,7 +263,7 @@ func (m Model) render() string {
 	}
 
 	if len(m.allTracks) == 0 && len(m.tracks) == 0 {
-		return appStyle.Render(
+		return padFrame(
 			titleStyle.Render("Classical Piano Tracker") + "\n\n" +
 				mutedStyle.Render("No local tracks found. Run `tracker sync` first.") + "\n\n" +
 				m.footerView(),
@@ -268,7 +271,7 @@ func (m Model) render() string {
 	}
 
 	if len(m.tracks) == 0 {
-		return appStyle.Render(
+		return padFrame(
 			titleStyle.Render("Classical Piano Tracker") + "\n" +
 				mutedStyle.Render("Local track history") + "\n\n" +
 				mutedStyle.Render(fmt.Sprintf("No tracks match /%s", strings.TrimSpace(m.searchQuery))) + "\n\n" +
@@ -287,12 +290,23 @@ func (m Model) render() string {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
 	}
 
-	return appStyle.Render(
+	return padFrame(
 		titleStyle.Render("Classical Piano Tracker") + "\n" +
 			mutedStyle.Render("Local track history") + "\n\n" +
 			body + "\n\n" +
 			m.footerView(),
 	)
+}
+
+// padFrame adds the outer margin by hand. A lipgloss Padding style would
+// re-measure and re-pad every line of the already laid-out frame, which was
+// about a third of View's cost; margins don't need that alignment.
+func padFrame(frame string) string {
+	// Match lipgloss, which expands tabs before rendering.
+	frame = strings.ReplaceAll(frame, "\t", "    ")
+	vertical := strings.Repeat("\n", appPadding)
+	horizontal := strings.Repeat(" ", appPadding)
+	return vertical + horizontal + strings.ReplaceAll(frame, "\n", "\n"+horizontal) + vertical
 }
 
 // renderPane sizes a bordered pane by its inner box. Lip Gloss v2 counts the
@@ -323,12 +337,12 @@ func (m Model) layout() layout {
 		height = 28
 	}
 
-	availableWidth := max(40, width-appStyle.GetHorizontalFrameSize())
+	availableWidth := max(40, width-2*appPadding)
 	footerHeight := lipgloss.Height(m.footerView())
 	headerHeight := 4
 	bodyHeight := max(
 		0,
-		height-appStyle.GetVerticalFrameSize()-headerHeight-footerHeight,
+		height-2*appPadding-headerHeight-footerHeight,
 	)
 
 	if availableWidth < verticalLayoutWidthCut {
@@ -429,13 +443,13 @@ func (m Model) renderDetails(width int, height int) string {
 			highlightStyle.Render(truncate(track.TrackName, max(16, width-2))),
 			mutedStyle.Render(truncate(m.textFor(*track).artists, max(16, width-2))),
 			"",
-			fmt.Sprintf("Stars: %s", m.ratingDraftStarsLabel()),
-			"Opinion:",
+			editorFieldLabel("Stars: "+m.ratingDraftStarsLabel(), !m.editingOpinion),
+			editorFieldLabel("Opinion:", m.editingOpinion),
 		}
-		lines = append(lines, trimLines(wrapText(m.draftOpinionCursorLine(), max(16, width-2)), max(1, height-len(lines)-2))...)
+		lines = append(lines, trimLines(wrapText(m.draftOpinionLine(), max(16, width-2)), max(1, height-len(lines)-2))...)
 		lines = append(lines, "")
-		lines = append(lines, mutedStyle.Render("1-5 set stars. Type to edit opinion."))
-		lines = append(lines, mutedStyle.Render("Enter saves. Esc cancels. Ctrl+U clears opinion."))
+		lines = append(lines, mutedStyle.Render("1-5 sets stars, then type your opinion."))
+		lines = append(lines, mutedStyle.Render("Tab switches field. Enter saves. Esc cancels."))
 		return strings.Join(trimLines(lines, height), "\n")
 	}
 
@@ -617,7 +631,14 @@ func (m Model) handleRatingEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.savingRating = true
 		m.clearStatus()
 		return m, m.saveRatingCmd(trackID, stars, opinion)
+	case "tab", "shift+tab":
+		m.editingOpinion = !m.editingOpinion
+		return m, nil
 	case "backspace":
+		if !m.editingOpinion {
+			m.draftStars = 0
+			return m, nil
+		}
 		if m.draftOpinion != "" {
 			_, size := utf8.DecodeLastRuneInString(m.draftOpinion)
 			m.draftOpinion = m.draftOpinion[:len(m.draftOpinion)-size]
@@ -626,18 +647,29 @@ func (m Model) handleRatingEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+u":
 		m.draftOpinion = ""
 		return m, nil
-	case "1", "2", "3", "4", "5":
-		m.draftStars = int(msg.Code - '0')
-		return m, nil
 	}
 
+	if !m.editingOpinion {
+		// The stars field takes a single digit and then hands focus to the
+		// opinion, so the usual "5, then type" flow needs no extra key.
+		switch msg.String() {
+		case "1", "2", "3", "4", "5":
+			m.draftStars = int(msg.Code - '0')
+			m.editingOpinion = true
+			return m, nil
+		}
+	}
+
+	// Any other text starts (or continues) the opinion.
 	if msg.Code == tea.KeySpace {
 		m.draftOpinion += " "
+		m.editingOpinion = true
 		return m, nil
 	}
 
 	if msg.Text != "" {
 		m.draftOpinion += msg.Text
+		m.editingOpinion = true
 		return m, nil
 	}
 
@@ -739,6 +771,7 @@ func (m Model) saveRatingCmd(trackID int64, stars int, opinion string) tea.Cmd {
 
 func (m *Model) startRatingEditor() {
 	m.editingRating = true
+	m.editingOpinion = false
 	m.clearStatus()
 	if rating := m.selectedRating(); rating != nil {
 		m.draftStars = int(rating.Stars)
@@ -763,7 +796,7 @@ func (m *Model) clearStatus() {
 func (m Model) footerView() string {
 	base := "j/k or arrows: move   g/G: top/bottom   o: sort   s: sync   enter/e: rate   r: reload   q: quit"
 	if m.editingRating {
-		base = "1-5: stars   type: opinion   backspace: delete   enter: save   esc: cancel"
+		base = "1-5: stars   tab: switch field   ctrl+u: clear opinion   enter: save   esc: cancel"
 	}
 	if m.searching {
 		base = "type: search   backspace: delete   enter: apply   esc: clear"
@@ -798,11 +831,19 @@ func (m Model) ratingDraftStarsLabel() string {
 	return fmt.Sprintf("%d/5", m.draftStars)
 }
 
-func (m Model) draftOpinionCursorLine() string {
-	if m.draftOpinion == "" {
-		return "_"
+// draftOpinionLine shows the text cursor only while the opinion has focus.
+func (m Model) draftOpinionLine() string {
+	if m.editingOpinion {
+		return m.draftOpinion + "_"
 	}
-	return m.draftOpinion + "_"
+	return m.draftOpinion
+}
+
+func editorFieldLabel(label string, focused bool) string {
+	if focused {
+		return highlightStyle.Render("> " + label)
+	}
+	return "  " + label
 }
 
 func formatTrackArtists(raw string) string {

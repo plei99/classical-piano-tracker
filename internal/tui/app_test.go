@@ -562,6 +562,115 @@ func TestViewIncludesScrollableHint(t *testing.T) {
 	}
 }
 
+// openRatingEditor returns a model with the editor open on a fresh track.
+func openRatingEditor(t *testing.T) Model {
+	t.Helper()
+	model := Model{tracks: []db.Track{{ID: 1, TrackName: "One", Artists: `["A"]`}}}
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(Model)
+	if !got.editingRating || got.editingOpinion {
+		t.Fatalf("editor should open on the stars field: editing=%v opinion=%v", got.editingRating, got.editingOpinion)
+	}
+	return got
+}
+
+func typeKeys(m Model, keys ...tea.KeyPressMsg) Model {
+	for _, key := range keys {
+		updated, _ := m.Update(key)
+		m = updated.(Model)
+	}
+	return m
+}
+
+func typeText(m Model, text string) Model {
+	for _, r := range text {
+		m = typeKeys(m, textKey(string(r)))
+	}
+	return m
+}
+
+func TestRatingEditorDigitsInOpinionAfterStars(t *testing.T) {
+	t.Parallel()
+
+	got := typeText(openRatingEditor(t), "5")
+	if got.draftStars != 5 || !got.editingOpinion {
+		t.Fatalf("after 5: stars=%d editingOpinion=%v, want 5 and focus on opinion", got.draftStars, got.editingOpinion)
+	}
+
+	got = typeText(got, "Op. 25 No. 1")
+	if got.draftOpinion != "Op. 25 No. 1" {
+		t.Fatalf("draftOpinion = %q, want digits kept as text", got.draftOpinion)
+	}
+	if got.draftStars != 5 {
+		t.Fatalf("draftStars = %d, digits in the opinion should not change stars", got.draftStars)
+	}
+}
+
+func TestRatingEditorTextOnStarsFieldStartsOpinion(t *testing.T) {
+	t.Parallel()
+
+	got := typeText(openRatingEditor(t), "7th")
+	if got.draftStars != 0 || got.draftOpinion != "7th" || !got.editingOpinion {
+		t.Fatalf("stars=%d opinion=%q editingOpinion=%v, want unset stars and opinion %q", got.draftStars, got.draftOpinion, got.editingOpinion, "7th")
+	}
+}
+
+func TestRatingEditorTabSwitchesField(t *testing.T) {
+	t.Parallel()
+
+	got := typeText(openRatingEditor(t), "4Lovely")
+	got = typeKeys(got, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if got.editingOpinion {
+		t.Fatal("shift+tab should move focus to the stars field")
+	}
+
+	got = typeText(got, "2")
+	if got.draftStars != 2 || got.draftOpinion != "Lovely" || !got.editingOpinion {
+		t.Fatalf("stars=%d opinion=%q editingOpinion=%v, want stars changed and focus back on opinion", got.draftStars, got.draftOpinion, got.editingOpinion)
+	}
+
+	got = typeKeys(got, tea.KeyPressMsg{Code: tea.KeyTab})
+	if got.editingOpinion {
+		t.Fatal("tab should toggle focus back to the stars field")
+	}
+}
+
+func TestRatingEditorBackspaceEditsFocusedField(t *testing.T) {
+	t.Parallel()
+
+	got := typeText(openRatingEditor(t), "3ab")
+	got = typeKeys(got, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if got.draftOpinion != "a" || got.draftStars != 3 {
+		t.Fatalf("stars=%d opinion=%q, want backspace to delete from the opinion", got.draftStars, got.draftOpinion)
+	}
+
+	got = typeKeys(got, tea.KeyPressMsg{Code: tea.KeyTab}, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if got.draftStars != 0 || got.draftOpinion != "a" {
+		t.Fatalf("stars=%d opinion=%q, want backspace on the stars field to clear stars only", got.draftStars, got.draftOpinion)
+	}
+}
+
+func TestViewShowsRatingEditorFocus(t *testing.T) {
+	t.Parallel()
+
+	model := Model{
+		width:  120,
+		height: 28,
+		tracks: []db.Track{{ID: 1, TrackName: "One", Artists: `["A"]`}},
+	}
+	model.startRatingEditor()
+	model.draftOpinion = "Op. 10"
+
+	if view := model.View().Content; !strings.Contains(view, "> Stars: not set") || strings.Contains(view, "Op. 10_") {
+		t.Fatalf("View() = %q, want focus marker on stars and no opinion cursor", view)
+	}
+
+	model = typeText(model, "4")
+	if view := model.View().Content; !strings.Contains(view, "> Opinion:") || !strings.Contains(view, "Stars: 4/5") || !strings.Contains(view, "Op. 10_") {
+		t.Fatalf("View() = %q, want focus marker and cursor on the opinion", view)
+	}
+}
+
 func TestViewShowsRatingEditor(t *testing.T) {
 	t.Parallel()
 
@@ -696,10 +805,10 @@ func TestPasteAppendsToSearchAndOpinion(t *testing.T) {
 
 	got.searching = false
 	got.editingRating = true
-	updated, _ = got.Update(tea.PasteMsg{Content: "Crystalline"})
+	updated, _ = got.Update(tea.PasteMsg{Content: "Op. 111"})
 	got = updated.(Model)
-	if got.draftOpinion != "Crystalline" {
-		t.Fatalf("draftOpinion = %q, want pasted text", got.draftOpinion)
+	if got.draftOpinion != "Op. 111" || got.draftStars != 0 || !got.editingOpinion {
+		t.Fatalf("draftOpinion=%q stars=%d editingOpinion=%v, want pasted text in the opinion", got.draftOpinion, got.draftStars, got.editingOpinion)
 	}
 }
 

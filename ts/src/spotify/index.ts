@@ -4,11 +4,14 @@
  */
 export { authenticator, DEFAULT_REDIRECT_URL, login, type LoginOptions, SCOPES } from './auth';
 export {
+  type AlbumArt,
   API_BASE_URL,
   type Artist,
   artistNames,
   Client,
   type ClientOptions,
+  MAX_TRACK_BATCH,
+  pickAlbumArt,
   type RecentTrack,
   SpotifyApiError,
   type TokenPersister,

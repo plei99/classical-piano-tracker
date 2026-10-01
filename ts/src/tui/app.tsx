@@ -1,14 +1,15 @@
 /**
- * The Ink program: owns the model, feeds it keys, pastes, and resizes, and
- * runs the commands `update` returns, dispatching their results back as
- * messages. Nothing here blocks a render on I/O.
+ * The Ink program: the shared `useTracker` hook owns the model and runs its
+ * commands; this file feeds it keys, pastes, and resizes and draws frames
+ * on the character grid. Nothing here blocks a render on I/O.
  */
 import { render, useApp, useInput, usePaste, useWindowSize, type RenderOptions } from 'ink';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import { FrameView } from './frame';
 import { keyMessages } from './keys';
-import { init, newModel, quit, update, type Deps, type Model, type Msg } from './model';
+import type { Deps, Model } from '../app/model';
+import { useTracker } from '../app/useTracker';
 import { view } from './view';
 
 /**
@@ -33,52 +34,17 @@ export function App({ deps, initialModel }: AppProps) {
   // way Ink's layout does when the stream reports no size), so the model
   // always lays out for the width Ink draws into.
   const { columns, rows } = useWindowSize();
-  const [model, setModel] = useState<Model>(() => initialModel ?? newModel(deps, { width: columns, height: rows }));
-  // Messages can arrive between renders, so update always reads the latest
-  // model here rather than the one captured by the last render.
-  const latest = useRef(model);
-  const started = useRef(false);
-  const exited = useRef(false);
-
-  const dispatch = useCallback(
-    (msg: Msg): void => {
-      if (exited.current) {
-        return;
-      }
-      if (msg.type === 'quit') {
-        exited.current = true;
-        exit();
-        return;
-      }
-      const [next, cmd] = update(latest.current, msg);
-      if (next !== latest.current) {
-        latest.current = next;
-        setModel(next);
-      }
-      if (cmd === quit) {
-        exited.current = true;
-        exit();
-      } else if (cmd !== null) {
-        // Commands resolve (never reject) to their result message.
-        void cmd().then(dispatch);
-      }
-    },
-    [exit],
-  );
-
-  // Start the initial load once, on mount, like Bubble Tea's Init.
-  useEffect(() => {
-    if (!started.current) {
-      started.current = true;
-      void init(latest.current)().then(dispatch);
-    }
-  }, [dispatch]);
+  const { model, dispatch } = useTracker(deps, {
+    ...(initialModel !== undefined && { initialModel }),
+    fields: { width: columns, height: rows },
+    onQuit: exit,
+  });
 
   useEffect(() => {
-    if (latest.current.width !== columns || latest.current.height !== rows) {
+    if (model.width !== columns || model.height !== rows) {
       dispatch({ type: 'resize', width: columns, height: rows });
     }
-  }, [columns, rows, dispatch]);
+  }, [columns, rows, model.width, model.height, dispatch]);
 
   useInput((input, key) => {
     for (const msg of keyMessages(input, key)) {

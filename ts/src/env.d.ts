@@ -7,3 +7,6 @@ declare module '*?raw' {
 
 // Injected by scripts/build.mjs; absent when running from source (tests).
 declare const __TRACKER_BUILD__: { version: string; commit: string; date: string } | undefined;
+
+// Stylesheets imported by the web client; esbuild emits them as app.css.
+declare module '*.css';

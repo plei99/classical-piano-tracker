@@ -1,14 +1,15 @@
 /**
- * The TUI state machine: a pure `update(model, msg) -> [model, cmd]` port of
- * the Go Bubble Tea model, so tests drive it without a terminal. Background
- * work is described by commands (`Cmd`) that the Ink app runs and whose
- * results come back as messages.
+ * The track browser's state machine, shared by the Ink TUI and the web UI: a
+ * pure `update(model, msg) -> [model, cmd]` port of the Go Bubble Tea model,
+ * so tests drive it without a terminal or a browser. Background work is
+ * described by commands (`Cmd`) that the front end runs and whose results
+ * come back as messages.
  */
 import { formatArtists } from '../core/artists';
 import { errorMessage } from '../core/errors';
 import { emptySyncStats } from '../core/model';
 import type { Rating, SyncStats, Track, UpsertRatingParams } from '../core/model';
-import { dropLastRune } from './text';
+import { dropLastRune } from './strings';
 
 /**
  * I/O callbacks injected by the CLI, so the TUI never touches the network
@@ -113,7 +114,25 @@ export type Msg =
   | { readonly type: 'ratingSaved'; readonly trackId: number; readonly rating?: Rating; readonly err?: Error }
   | KeyMsg
   | { readonly type: 'paste'; readonly text: string }
-  | { readonly type: 'quit' };
+  | { readonly type: 'quit' }
+  | PointerMsg;
+
+/**
+ * Intents from front ends with a pointer and form fields (the web UI). The
+ * keyboard flow stays the source of truth; these are the clicks and text
+ * fields that stand in for it, with the same guards as the keys.
+ */
+export type PointerMsg =
+  /** Clicking a row selects that track. */
+  | { readonly type: 'select'; readonly trackId: number }
+  /** Typing in the search field replaces the whole query. */
+  | { readonly type: 'setSearch'; readonly query: string }
+  /** Clicking a star in the rating editor. */
+  | { readonly type: 'setDraftStars'; readonly stars: number }
+  /** Editing the opinion text field. */
+  | { readonly type: 'setDraftOpinion'; readonly text: string }
+  /** Focusing an editor field. */
+  | { readonly type: 'focusField'; readonly field: 'stars' | 'opinion' };
 
 /** Background work. Commands never reject: failures come back as messages. */
 export type Cmd = () => Promise<Msg>;
@@ -240,6 +259,31 @@ export function update(m: Model, msg: Msg): [Model, Cmd | null] {
       return [m, null];
     case 'quit':
       return [m, null];
+    case 'select': {
+      if (m.syncing || m.savingRating || m.editingRating) {
+        return [m, null];
+      }
+      const index = m.tracks.findIndex((track) => track.id === msg.trackId);
+      return [index < 0 ? m : moveSelectionTo(m, index), null];
+    }
+    case 'setSearch': {
+      if (m.syncing || m.savingRating || m.editingRating || msg.query === m.searchQuery) {
+        return [m, null];
+      }
+      const next = { ...m, searchQuery: msg.query };
+      clearStatus(next);
+      refreshTrackList(next, selectedTrackID(m));
+      return [next, null];
+    }
+    case 'setDraftStars':
+      if (!m.editingRating || !Number.isInteger(msg.stars) || msg.stars < 0 || msg.stars > 5) {
+        return [m, null];
+      }
+      return [{ ...m, draftStars: msg.stars }, null];
+    case 'setDraftOpinion':
+      return m.editingRating ? [{ ...m, draftOpinion: msg.text, editingOpinion: true }, null] : [m, null];
+    case 'focusField':
+      return m.editingRating ? [{ ...m, editingOpinion: msg.field === 'opinion' }, null] : [m, null];
   }
 }
 

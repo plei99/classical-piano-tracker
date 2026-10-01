@@ -41,6 +41,53 @@ const rawPlugin = {
   },
 };
 
+/**
+ * The browser client for `tracker web`, built first and embedded in the CLI
+ * bundle (and so in the compiled binary) as the `virtual:web-assets` module:
+ * a map from URL path to file, which the local server serves from memory.
+ */
+async function buildWebAssets() {
+  const result = await esbuild.build({
+    entryPoints: { app: `${root}src/web/client/main.tsx`, theme: `${root}src/web/client/theme-boot.ts` },
+    outdir: '/assets',
+    bundle: true,
+    platform: 'browser',
+    format: 'esm',
+    target: ['chrome120', 'firefox120', 'safari17'],
+    jsx: 'automatic',
+    minify: process.env.TRACKER_MINIFY !== '0',
+    legalComments: 'none',
+    define: { 'process.env.NODE_ENV': '"production"' },
+    write: false,
+    logLevel: 'warning',
+  });
+  const types = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+  const assets = {
+    '/': {
+      contentType: 'text/html; charset=utf-8',
+      body: await readFile(`${root}src/web/client/index.html`, 'utf8'),
+    },
+  };
+  for (const file of result.outputFiles) {
+    const extension = file.path.slice(file.path.lastIndexOf('.'));
+    assets[file.path] = { contentType: types[extension], body: file.text };
+  }
+  return assets;
+}
+
+const webAssets = await buildWebAssets();
+
+const webAssetsPlugin = {
+  name: 'web-assets',
+  setup(b) {
+    b.onResolve({ filter: /^virtual:web-assets$/ }, () => ({ path: 'web-assets', namespace: 'web-assets' }));
+    b.onLoad({ filter: /.*/, namespace: 'web-assets' }, () => ({
+      contents: `export default ${JSON.stringify(webAssets)};`,
+      loader: 'js',
+    }));
+  },
+};
+
 await esbuild.build({
   entryPoints: [`${root}src/main.ts`],
   outfile: `${root}dist/tracker.js`,
@@ -51,7 +98,7 @@ await esbuild.build({
   // TRACKER_MINIFY=0 keeps names readable for CPU profiles.
   minify: process.env.TRACKER_MINIFY !== '0',
   legalComments: 'none',
-  plugins: [rawPlugin],
+  plugins: [rawPlugin, webAssetsPlugin],
   // Ink only loads React DevTools when DEV=true; keep it out of the bundle.
   alias: { 'react-devtools-core': `${root}scripts/empty-module.mjs` },
   define: {

@@ -19,6 +19,19 @@ const DEFAULT_RETRY_DURATION_MS = 5_000;
 const MAX_INT32 = 2 ** 31 - 1;
 const MIN_INT32 = -(2 ** 31);
 
+/** Spotify's limit on IDs per `GET /tracks` request. */
+export const MAX_TRACK_BATCH = 50;
+
+/**
+ * A track's album art in Spotify's three usual sizes (~64, ~300, ~640 px).
+ * Every size is null when the album has no images.
+ */
+export interface AlbumArt {
+  small: string | null;
+  medium: string | null;
+  large: string | null;
+}
+
 /** Called with the merged token whenever the client refreshes it. */
 export type TokenPersister = (token: Token) => void | Promise<void>;
 
@@ -139,6 +152,40 @@ export class Client implements ArtistSearcher {
     }
     await this.persistCurrentToken();
     return artists;
+  }
+
+  /**
+   * Album art for up to MAX_TRACK_BATCH tracks via `GET /tracks?ids=`.
+   * Tracks Spotify does not know are absent from the result. Spotify
+   * restricts this endpoint for some development-mode apps (403/404); the
+   * SpotifyApiError status lets callers fall back to `trackAlbumArt`.
+   */
+  async albumArt(ids: readonly string[]): Promise<Map<string, AlbumArt>> {
+    if (ids.length === 0 || ids.length > MAX_TRACK_BATCH) {
+      throw new Error(`track batch must hold 1 to ${MAX_TRACK_BATCH} IDs, got ${ids.length}`);
+    }
+    const url = `${this.apiBaseUrl}tracks?${encodeValues({ ids: ids.join(',') })}`;
+    let art: Map<string, AlbumArt>;
+    try {
+      art = decodeTracksAlbumArt(await this.get(url), ids);
+    } catch (err) {
+      throw wrap('fetch Spotify tracks', err);
+    }
+    await this.persistCurrentToken();
+    return art;
+  }
+
+  /** Album art for one track via `GET /tracks/{id}`; an unknown track is a 404 SpotifyApiError. */
+  async trackAlbumArt(id: string): Promise<AlbumArt> {
+    const url = `${this.apiBaseUrl}tracks/${encodeURIComponent(id)}`;
+    let art: AlbumArt;
+    try {
+      art = albumArtOf(asObject(await this.get(url), 'spotify.FullTrack'));
+    } catch (err) {
+      throw wrap(`fetch Spotify track ${quote(id)}`, err);
+    }
+    await this.persistCurrentToken();
+    return art;
   }
 
   /** Returns a usable token, refreshing it first when expired or about to expire. */
@@ -429,6 +476,60 @@ export function normalizeRecentlyPlayed(items: RecentlyPlayedItem[]): RecentTrac
       playedAtNs,
     };
   });
+}
+
+/** The size the "medium" slot aims for; Spotify's middle image is 300 px. */
+const MEDIUM_IMAGE_PX = 300;
+
+/**
+ * Picks small/medium/large from an album's images by width rather than by
+ * position: Spotify usually lists them largest first, but does not promise
+ * it, and some albums carry only one or two sizes.
+ */
+export function pickAlbumArt(images: readonly { url: string; width: number }[]): AlbumArt {
+  const usable = images.filter((image) => image.url !== '').sort((a, b) => a.width - b.width);
+  const smallest = usable[0];
+  const largest = usable[usable.length - 1];
+  if (smallest === undefined || largest === undefined) {
+    return { small: null, medium: null, large: null };
+  }
+  let medium = smallest;
+  for (const image of usable) {
+    if (Math.abs(image.width - MEDIUM_IMAGE_PX) < Math.abs(medium.width - MEDIUM_IMAGE_PX)) {
+      medium = image;
+    }
+  }
+  return { small: smallest.url, medium: medium.url, large: largest.url };
+}
+
+function albumArtOf(track: JSONObject): AlbumArt {
+  const album = optionalObject(track, 'album', 'FullTrack');
+  return pickAlbumArt(
+    optionalArray(album, 'images', 'SimpleAlbum').map((raw) => {
+      const image = asObject(raw, 'spotify.Image');
+      return { url: optionalString(image, 'url', 'Image'), width: numeric(image, 'width', 'Image') };
+    }),
+  );
+}
+
+/**
+ * Decodes a `GET /tracks` page. Spotify answers in request order with null
+ * for unknown IDs, so results are keyed by the requested ID: a relinked
+ * track can come back under a different `id`.
+ */
+export function decodeTracksAlbumArt(value: unknown, ids: readonly string[]): Map<string, AlbumArt> {
+  const art = new Map<string, AlbumArt>();
+  if (value === null) {
+    return art;
+  }
+  const page = asObject(value, 'spotify.FullTrackPage');
+  optionalArray(page, 'tracks', 'FullTrackPage').forEach((raw, index) => {
+    const id = ids[index];
+    if (raw !== null && id !== undefined) {
+      art.set(id, albumArtOf(asObject(raw, 'spotify.FullTrack')));
+    }
+  });
+  return art;
 }
 
 /** Maps an artist search page to catalog artists; a missing page means none. */

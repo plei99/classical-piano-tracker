@@ -1,0 +1,7 @@
+// The built browser client, provided by scripts/build.mjs as a virtual
+// module so the compiled binary carries its assets without a dist folder.
+// It does not exist when running from source; tests inject assets instead.
+declare module 'virtual:web-assets' {
+  const assets: import('./server').WebAssets;
+  export default assets;
+}

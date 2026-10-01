@@ -14,7 +14,7 @@ import { afterAll, test } from 'vitest';
 
 import { Db } from '../core/db';
 import { FrameView } from './frame';
-import { newModel, tracksLoadedMsg, update, type Model } from './model';
+import { newModel, tracksLoadedMsg, update, type Model } from '../app/model';
 import { benchRatings, benchTracks, mountInk, textKey, type InkHarness } from './testkit';
 import { view } from './view';
 

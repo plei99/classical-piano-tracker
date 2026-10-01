@@ -13,7 +13,7 @@ import statusLong from './testdata/go_status_long.txt?raw';
 import tiny from './testdata/go_tiny.txt?raw';
 import wideMid from './testdata/go_wide_mid.txt?raw';
 import wideRated from './testdata/go_wide_rated.txt?raw';
-import { startRatingEditor, type Model } from './model';
+import { startRatingEditor, type Model } from '../app/model';
 import { goldenModel, renderText, typeText } from './testkit';
 
 function expectMatchesGo(m: Model, golden: string): void {

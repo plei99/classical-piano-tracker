@@ -8,6 +8,7 @@ import {
   decodeRecentlyPlayed,
   normalizeRecentlyPlayed,
   normalizeRecentTrackLimit,
+  pickAlbumArt,
   type RecentlyPlayedItem,
   retryDurationMs,
   SpotifyApiError,
@@ -369,6 +370,69 @@ describe('Client', () => {
     const h = await harness(tokenExpiringIn(3600), () => jsonReply(400, '{"error":{"message":"Bad limit"}}'));
     await expect(h.client.searchArtists('Gould', 99)).rejects.toThrow(
       /^search Spotify artists for "Gould": spotify: HTTP 400: Bad limit$/,
+    );
+  });
+});
+
+describe('pickAlbumArt', () => {
+  it('chooses by width, not position', () => {
+    expect(
+      pickAlbumArt([
+        { url: 'm', width: 300 },
+        { url: 'l', width: 640 },
+        { url: 's', width: 64 },
+      ]),
+    ).toEqual({ small: 's', medium: 'm', large: 'l' });
+    expect(pickAlbumArt([{ url: 'only', width: 640 }])).toEqual({ small: 'only', medium: 'only', large: 'only' });
+    expect(pickAlbumArt([{ url: '', width: 64 }])).toEqual({ small: null, medium: null, large: null });
+  });
+});
+
+describe('Client album art', () => {
+  const IMAGES = [
+    { url: 'https://i.scdn.co/640', width: 640, height: 640 },
+    { url: 'https://i.scdn.co/300', width: 300, height: 300 },
+    { url: 'https://i.scdn.co/64', width: 64, height: 64 },
+  ];
+  const ART = { small: 'https://i.scdn.co/64', medium: 'https://i.scdn.co/300', large: 'https://i.scdn.co/640' };
+
+  it('batches IDs, keys results by the requested ID, and skips unknown tracks', async () => {
+    const h = await harness(tokenExpiringIn(-60), () =>
+      jsonReply(200, JSON.stringify({ tracks: [{ id: 'relinked', album: { images: IMAGES } }, null] })),
+    );
+    const art = await h.client.albumArt(['a', 'b']);
+    expect([...art]).toEqual([['a', ART]]);
+    expect(h.api.requests[0]!.target).toBe('/tracks?ids=a%2Cb');
+    // The refreshed token goes through the same persister as every other call.
+    expect(h.persisted).toHaveLength(1);
+  });
+
+  it('rejects empty and oversized batches before any request', async () => {
+    const h = await harness(tokenExpiringIn(3600), () => jsonReply(200, '{}'));
+    await expect(h.client.albumArt([])).rejects.toThrow('track batch must hold 1 to 50 IDs, got 0');
+    await expect(h.client.albumArt(Array.from({ length: 51 }, (_, i) => `id${i}`))).rejects.toThrow('got 51');
+    expect(h.api.requests).toHaveLength(0);
+  });
+
+  it('keeps the status of a refused batch for the caller', async () => {
+    const h = await harness(tokenExpiringIn(3600), () => jsonReply(403, '{"error":{"status":403,"message":"no"}}'));
+    const err = await h.client.albumArt(['a']).then(
+      () => new Error('expected a rejection'),
+      (e: unknown) => e as Error,
+    );
+    expect(err.message).toBe('fetch Spotify tracks: spotify: HTTP 403: no');
+    expect((err.cause as SpotifyApiError).status).toBe(403);
+  });
+
+  it('looks up one track', async () => {
+    const h = await harness(tokenExpiringIn(3600), (request) =>
+      request.target === '/tracks/known'
+        ? jsonReply(200, JSON.stringify({ id: 'known', album: { images: IMAGES } }))
+        : jsonReply(404, '{"error":{"status":404,"message":"Not found."}}'),
+    );
+    expect(await h.client.trackAlbumArt('known')).toEqual(ART);
+    await expect(h.client.trackAlbumArt('gone')).rejects.toThrow(
+      'fetch Spotify track "gone": spotify: HTTP 404: Not found.',
     );
   });
 });

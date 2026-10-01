@@ -20,6 +20,42 @@ npx vitest bench --run src/tui   # TUI benchmarks
 build metadata the build script otherwise reads from git. `TRACKER_MINIFY=0`
 keeps the bundle readable for CPU profiles.
 
+## Web UI
+
+```bash
+tracker web                  # serves http://127.0.0.1:8765/ and opens your browser
+tracker web --port 9000 --no-open
+tracker-sandbox ts web       # the same, on a copy of your data
+```
+
+The web UI looks like the TUI and uses the same keys: j/k, g/G, `/` to
+search, o to sort, s to sync, e or Enter to rate, and r to reload. It
+adds:
+
+- **Album art** in every row and large in the detail pane. It is looked up
+  through Spotify's API, falling back to Spotify's public oEmbed endpoint
+  when there is no usable token, and cached in `artwork-cache.json` next
+  to the database.
+- **Play** (or p), which plays in the page through Spotify's embed. That
+  is the full track when this browser is signed in to Spotify Premium, and
+  a 30-second preview otherwise. The player is docked above the footer and
+  keeps playing while you browse.
+- **Open in Spotify** (or a), a `spotify:track:` link that macOS hands to
+  the Spotify app.
+- **A light/dark/auto switch.** Auto follows the system setting; your
+  choice is remembered per browser.
+
+The TUI and the web UI share their state machine (`src/app/model.ts`),
+their wording and layout decisions (`src/app/presenter.ts`), and the React
+hook that runs them (`src/app/useTracker.ts`). Only the drawing differs:
+Ink on a character grid in `src/tui`, React DOM with CSS in
+`src/web/client`.
+
+The server listens on 127.0.0.1 only and rejects other Host headers. Every
+write needs a per-launch token embedded in the page. Spotify's player
+requires `'unsafe-eval'` in the page's script policy; only this app's
+bundle and Spotify's scripts can run.
+
 ## Layout
 
 | Directory       | Ports                   | Notes                                                                                                                                                                                              |
@@ -28,7 +64,9 @@ keeps the bundle readable for CPU profiles.
 | `src/spotify`   | `spotify`, `syncer`     | OAuth and Web API over `fetch`. The sync checkpoint is a bigint of nanoseconds, parsed without going through `Date`.                                                                               |
 | `src/recommend` | `recommend`             | Go-exact `math.Log1p`, emulated fused multiply-add (Go fuses on arm64), `%.2f` rounding, and `json.Unmarshal` semantics.                                                                           |
 | `src/llm`       | `llm`, `llm/providers`  | Prompts and request bodies are checked against captured Go output.                                                                                                                                 |
+| `src/app`       | (shared)                | State machine, presenter, and React hook used by both the TUI and the web UI.                                                                                                                      |
 | `src/tui`       | `tui`                   | A pure reducer plus Ink rendering. Frames match Go's goldens character for character.                                                                                                              |
+| `src/web`       | (new)                   | `tracker web`: a local HTTP server (`server/`) and the React DOM client (`client/`), bundled into the binary.                                                                                      |
 | `src/cli`       | `cli`, `buildinfo`      | commander. stdout, errors and exit codes match Go. Ink and React are only loaded by commands that draw.                                                                                            |
 
 ## Compared with the Go and Rust builds

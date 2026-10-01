@@ -50,13 +50,14 @@ export function newTuiDeps(configPath: string, db: Db): Deps {
 /**
  * The CLI's sync path (config loading, validation, token persistence),
  * re-read on every TUI sync so config edits made while it is open apply.
+ * `surface` names the UI in the first-run hint (`tracker web` shares this).
  */
-export async function tuiSync(configPath: string, db: Db): Promise<SyncStats> {
+export async function tuiSync(configPath: string, db: Db, surface = 'the TUI'): Promise<SyncStats> {
   const { cfg, created } = ensureLoadedConfig(configPath);
   if (created) {
     throw createdConfigError(
       configPath,
-      `set spotify.client_id and spotify.client_secret, run \`tracker --config ${quote(configPath)} spotify login\`, then retry sync from the TUI`,
+      `set spotify.client_id and spotify.client_secret, run \`tracker --config ${quote(configPath)} spotify login\`, then retry sync from ${surface}`,
     );
   }
   validateSyncConfig(cfg, configPath);

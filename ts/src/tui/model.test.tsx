@@ -23,7 +23,7 @@ import {
   update,
   type Model,
   type Msg,
-} from './model';
+} from '../app/model';
 import { renderText, specialKey, textKey, typeKeys, typeText } from './testkit';
 import { truncate } from './text';
 import { footerView, layout, view, visibleTracks } from './view';

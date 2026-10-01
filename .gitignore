@@ -71,3 +71,4 @@ backend/tracker.db-*
 # TypeScript rewrite
 /ts/node_modules/
 /ts/dist/
+/ts/.*.bun-build

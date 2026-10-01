@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { App } from './app';
 import { keyMessages } from './keys';
-import { newModel, startRatingEditor, type Deps } from './model';
+import { newModel, startRatingEditor, type Deps } from '../app/model';
 import { goldenModel, goldenRating, goldenTracks, mountInk, renderText } from './testkit';
 import type { Line } from './text';
 import { view, type Row } from './view';

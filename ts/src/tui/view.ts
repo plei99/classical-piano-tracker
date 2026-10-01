@@ -4,8 +4,27 @@
  * `frame.tsx` draw. Keeping it pure lets tests inspect layout without a
  * terminal. The geometry follows the Go Lip Gloss layout cell for cell.
  */
+import { textFor, type Model } from '../app/model';
+import {
+  EDITOR_HELP,
+  formatTime,
+  LOADING_TEXT,
+  NO_TRACKS_TEXT,
+  RETRY_TEXT,
+  SUBTITLE,
+  TITLE as TITLE_TEXT,
+  details,
+  draftOpinionLine,
+  errorText,
+  hintText,
+  hints,
+  noMatchText,
+  ratingDraftStarsLabel,
+  screen,
+  status,
+  trackListSummary,
+} from '../app/presenter';
 import type { Track } from '../core/model';
-import { selectedRating, selectedTrack, sortModeLabel, textFor, totalTrackCount, type Model } from './model';
 import {
   clipLine,
   expandTabs,
@@ -46,18 +65,6 @@ const ERROR: Style = { bold: true };
 
 const BLANK: Line = [];
 const ELLIPSIS: Line = [{ text: '...', style: MUTED }];
-
-const browsingHints = [
-  'j/k or arrows: move',
-  'g/G: top/bottom',
-  'o: sort',
-  's: sync',
-  'enter/e: rate',
-  'r: reload',
-  'q: quit',
-];
-const editingHints = ['1-5: stars', 'tab: switch field', 'ctrl+u: clear opinion', 'enter: save', 'esc: cancel'];
-const searchHints = ['type: search', 'backspace: delete', 'enter: apply', 'esc: clear'];
 
 /**
  * Pane geometry, as in the Go `layout()`. Widths are the box inside the
@@ -153,26 +160,27 @@ export function view(m: Model): Frame {
   };
   const blank = () => rows.push({ kind: 'line', line: BLANK });
 
-  text('Classical Piano Tracker', TITLE);
-  if (m.loadingTracks) {
+  text(TITLE_TEXT, TITLE);
+  const current = screen(m);
+  if (current === 'loading') {
     blank();
-    text('Loading local tracks...', PLAIN);
-  } else if (m.err !== null) {
+    text(LOADING_TEXT, PLAIN);
+  } else if (current === 'error') {
     blank();
-    text(`Error: ${expandTabs(m.err.message)}`, ERROR);
+    text(expandTabs(errorText(m)), ERROR);
     blank();
-    text('Press r to retry or q to quit.', STATUS_BAR);
-  } else if (m.allTracks.length === 0 && m.tracks.length === 0) {
+    text(RETRY_TEXT, STATUS_BAR);
+  } else if (current === 'empty') {
     blank();
-    text('No local tracks found. Run `tracker sync` first.', MUTED);
+    text(NO_TRACKS_TEXT, MUTED);
     blank();
     text(footerView(m), STATUS_BAR);
   } else {
-    text('Local track history', MUTED);
+    text(SUBTITLE, MUTED);
     blank();
     const footer = footerView(m);
-    if (m.tracks.length === 0) {
-      text(`No tracks match /${expandTabs(m.searchQuery.trim())}`, MUTED);
+    if (current === 'noMatch') {
+      text(expandTabs(noMatchText(m)), MUTED);
       blank();
     } else {
       const geometry = layout(m, footer.split('\n').length);
@@ -336,12 +344,12 @@ function renderList(m: Model, width: number, height: number): Line[] {
 }
 
 function renderDetails(m: Model, width: number, height: number): Line[] {
-  const track = selectedTrack(m);
-  if (track === null) {
+  const shown = details(m);
+  if (shown === null) {
     return [styled('Track Details', TITLE), BLANK, styled('No track selected.', MUTED)];
   }
   const textWidth = Math.max(16, width - 2);
-  const artists = textFor(m, track).artists;
+  const { track, artists } = shown;
 
   if (m.editingRating) {
     const lines: Line[] = [
@@ -355,11 +363,7 @@ function renderDetails(m: Model, width: number, height: number): Line[] {
     ];
     const opinion = wrapText(expandTabs(draftOpinionLine(m)), textWidth).map((line) => styled(line, PLAIN));
     lines.push(...trimLines(opinion, Math.max(1, height - lines.length - 2), ELLIPSIS));
-    lines.push(
-      BLANK,
-      styled('1-5 sets stars, then type your opinion.', MUTED),
-      styled('Tab switches field. Enter saves. Esc cancels.', MUTED),
-    );
+    lines.push(BLANK, ...EDITOR_HELP.map((line) => styled(line, MUTED)));
     return trimLines(lines, height, ELLIPSIS);
   }
 
@@ -369,15 +373,11 @@ function renderDetails(m: Model, width: number, height: number): Line[] {
     styled(fit(track.trackName, textWidth), HIGHLIGHT),
     styled(fit(artists, textWidth), MUTED),
     BLANK,
-    styled(`ID: ${track.id}`, PLAIN),
-    styled(fit(`Spotify ID: ${track.spotifyId}`, textWidth), PLAIN),
-    styled(fit(`Album: ${track.albumName}`, textWidth), PLAIN),
-    styled(`Play Count: ${track.playCount}`, PLAIN),
-    styled(fit(`Last Played: ${formatTime(track.lastPlayedAt, m.timeZone)}`, textWidth), PLAIN),
+    ...shown.fields.map(({ label, value }) => styled(fit(`${label}: ${value}`, textWidth), PLAIN)),
   ];
 
-  const rating = selectedRating(m);
-  if (m.savingRating) {
+  const rating = shown.rating;
+  if (rating === 'saving') {
     lines.push(BLANK, styled('Rating: saving...', MUTED));
   } else if (rating === null) {
     lines.push(BLANK, styled('Rating: none', MUTED));
@@ -396,76 +396,17 @@ function editorFieldLabel(label: string, focused: boolean): Line {
   return focused ? styled(`> ${label}`, HIGHLIGHT) : styled(`  ${label}`, PLAIN);
 }
 
-function ratingDraftStarsLabel(m: Model): string {
-  return m.draftStars < 1 || m.draftStars > 5 ? 'not set' : `${m.draftStars}/5`;
-}
-
-/** Shows the text cursor only while the opinion has focus. */
-function draftOpinionLine(m: Model): string {
-  return m.editingOpinion ? `${m.draftOpinion}_` : m.draftOpinion;
-}
-
-function trackListSummary(m: Model): string {
-  const label = sortModeLabel(m.sortMode);
-  if (m.searchQuery.trim() === '') {
-    return `${m.tracks.length} loaded · sort: ${label}`;
-  }
-  return `${m.tracks.length}/${totalTrackCount(m)} shown · sort: ${label}`;
-}
-
 /**
  * The status line (if any) above the key help, wrapped to the frame width.
  * Plain text; the frame draws it faint.
  */
 export function footerView(m: Model): string {
   const width = frameWidth(m);
-  let hints: readonly string[] = m.editingRating ? editingHints : browsingHints;
-  if (m.searching) {
-    hints = searchHints;
-  }
-  const base = packHints(hints, width);
-
-  let status: string | null = null;
-  if (m.syncing) {
-    status = 'Syncing with Spotify...';
-  } else if (m.savingRating) {
-    status = 'Saving rating...';
-  } else if (m.statusMessage !== '') {
-    status = m.statusIsError ? `Error: ${m.statusMessage}` : m.statusMessage;
-  } else if (m.searching) {
-    status = `Search /${m.searchQuery}_ (${m.tracks.length}/${totalTrackCount(m)})`;
-  } else if (m.searchQuery.trim() !== '') {
-    status = `Filter /${m.searchQuery.trim()} (${m.tracks.length}/${totalTrackCount(m)})`;
-  }
-
   // Status text can be arbitrarily long (e.g. API errors), so it wraps; key
   // hints are packed whole.
-  return status === null ? base : `${hardWrap(expandTabs(status), width)}\n${base}`;
+  const base = packHints(hints(m).map(hintText), width);
+  const line = status(m);
+  return line === null ? base : `${hardWrap(expandTabs(line.text), width)}\n${base}`;
 }
 
-const pad2 = (value: number) => String(value).padStart(2, '0');
-
-/**
- * Formats Unix seconds like Go's `time.Unix(s, 0).Format(time.RFC3339)`:
- * local time with a numeric offset, or "Z" when the offset is zero.
- */
-export function formatTime(seconds: number, timeZone: 'local' | 'utc'): string {
-  const date = new Date(seconds * 1000);
-  if (Number.isNaN(date.getTime())) {
-    // Outside the range a Date can represent.
-    return String(seconds);
-  }
-  const offset = timeZone === 'utc' ? 0 : -date.getTimezoneOffset();
-  const local = new Date(date.getTime() + offset * 60_000);
-  const year = local.getUTCFullYear();
-  const yearText = year < 0 ? `-${String(-year).padStart(4, '0')}` : String(year).padStart(4, '0');
-  const stamp =
-    `${yearText}-${pad2(local.getUTCMonth() + 1)}-${pad2(local.getUTCDate())}` +
-    `T${pad2(local.getUTCHours())}:${pad2(local.getUTCMinutes())}:${pad2(local.getUTCSeconds())}`;
-  if (offset === 0) {
-    return `${stamp}Z`;
-  }
-  const sign = offset < 0 ? '-' : '+';
-  const abs = Math.abs(offset);
-  return `${stamp}${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
-}
+export { formatTime } from '../app/presenter';

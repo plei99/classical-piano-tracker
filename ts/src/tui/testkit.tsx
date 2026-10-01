@@ -10,7 +10,7 @@ import type { ReactNode } from 'react';
 
 import type { Rating, Track } from '../core/model';
 import { FrameView } from './frame';
-import { makeModel, tracksLoadedMsg, update, type KeyMsg, type Model, type Msg } from './model';
+import { makeModel, tracksLoadedMsg, update, type KeyMsg, type Model, type Msg } from '../app/model';
 import { view } from './view';
 
 /** The key press Bubble Tea v2 reports for typed text. */

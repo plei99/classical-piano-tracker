@@ -4,7 +4,7 @@
  */
 import type { Key } from 'ink';
 
-import type { KeyMsg } from './model';
+import type { KeyMsg } from '../app/model';
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 

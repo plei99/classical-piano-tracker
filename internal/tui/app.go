@@ -289,11 +289,15 @@ func (m Model) render() string {
 	} else {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, listPane, detailPane)
 	}
+	body = clipBlock(body, layout.bodyWidth, layout.bodyHeight)
+	if body != "" {
+		body += "\n\n"
+	}
 
 	return padFrame(
 		titleStyle.Render("Classical Piano Tracker") + "\n" +
 			mutedStyle.Render("Local track history") + "\n\n" +
-			body + "\n\n" +
+			body +
 			m.footerView(),
 	)
 }
@@ -309,12 +313,32 @@ func padFrame(frame string) string {
 	return vertical + horizontal + strings.ReplaceAll(frame, "\n", "\n"+horizontal) + vertical
 }
 
-// renderPane sizes a bordered pane by its inner box. Lip Gloss v2 counts the
-// border inside Width/Height, so it is added back to keep layout() unchanged.
+// clipBlock cuts a rendered block down to width x height cells. It only
+// does work when the block overflows, which happens in very small windows.
+func clipBlock(block string, width int, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	lines := strings.Split(block, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for idx, line := range lines {
+		if ansi.StringWidth(line) > width {
+			lines[idx] = ansi.Truncate(line, width, "")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderPane sizes a bordered pane. Lip Gloss v2 counts border and padding
+// inside Width/Height. width keeps the v1 meaning (padding included, as the
+// row truncation widths assume), while height is the number of content lines
+// the render functions fill, so the pane is exactly height plus its frame.
 func renderPane(style lipgloss.Style, width int, height int, content string) string {
 	return style.
 		Width(width + style.GetHorizontalBorderSize()).
-		Height(height + style.GetVerticalBorderSize()).
+		Height(height + style.GetVerticalFrameSize()).
 		Render(content)
 }
 
@@ -324,6 +348,22 @@ type layout struct {
 	detailWidth  int
 	listHeight   int
 	detailHeight int
+	// bodyWidth and bodyHeight bound the panes. Panes have fixed borders,
+	// padding, and minimum widths, so in a small window they can need more
+	// room than exists; the body is clipped to this box so the header and
+	// footer always stay on screen.
+	bodyWidth  int
+	bodyHeight int
+}
+
+// frameWidth is the width inside the outer margin. Before the first
+// WindowSizeMsg it assumes a 100-column terminal.
+func (m Model) frameWidth() int {
+	width := m.width
+	if width <= 0 {
+		width = 100
+	}
+	return max(1, width-2*appPadding)
 }
 
 func (m Model) layout() layout {
@@ -360,6 +400,8 @@ func (m Model) layout() layout {
 			detailWidth:  paneWidth,
 			listHeight:   listHeight,
 			detailHeight: detailHeight,
+			bodyWidth:    m.frameWidth(),
+			bodyHeight:   bodyHeight,
 		}
 	}
 
@@ -380,6 +422,8 @@ func (m Model) layout() layout {
 		detailWidth:  detailWidth,
 		listHeight:   listHeight,
 		detailHeight: detailHeight,
+		bodyWidth:    m.frameWidth(),
+		bodyHeight:   bodyHeight,
 	}
 }
 
@@ -793,14 +837,41 @@ func (m *Model) clearStatus() {
 	m.statusIsError = false
 }
 
+var (
+	browsingHints = []string{"j/k or arrows: move", "g/G: top/bottom", "o: sort", "s: sync", "enter/e: rate", "r: reload", "q: quit"}
+	editingHints  = []string{"1-5: stars", "tab: switch field", "ctrl+u: clear opinion", "enter: save", "esc: cancel"}
+	searchHints   = []string{"type: search", "backspace: delete", "enter: apply", "esc: clear"}
+)
+
+// packHints joins key hints with a 3-space gap, starting a new line rather
+// than splitting a hint when the next one would overflow width.
+func packHints(hints []string, width int) string {
+	var lines []string
+	current := ""
+	for _, hint := range hints {
+		switch {
+		case current == "":
+			current = hint
+		case ansi.StringWidth(current)+3+ansi.StringWidth(hint) <= width:
+			current += "   " + hint
+		default:
+			lines = append(lines, current)
+			current = hint
+		}
+	}
+	return strings.Join(append(lines, current), "\n")
+}
+
 func (m Model) footerView() string {
-	base := "j/k or arrows: move   g/G: top/bottom   o: sort   s: sync   enter/e: rate   r: reload   q: quit"
+	width := m.frameWidth()
+	hints := browsingHints
 	if m.editingRating {
-		base = "1-5: stars   tab: switch field   ctrl+u: clear opinion   enter: save   esc: cancel"
+		hints = editingHints
 	}
 	if m.searching {
-		base = "type: search   backspace: delete   enter: apply   esc: clear"
+		hints = searchHints
 	}
+	base := packHints(hints, width)
 
 	var lines []string
 	switch {
@@ -820,6 +891,10 @@ func (m Model) footerView() string {
 		lines = append(lines, fmt.Sprintf("Filter /%s (%d/%d)", strings.TrimSpace(m.searchQuery), len(m.tracks), m.totalTrackCount()))
 	}
 
+	// Status text can be arbitrarily long (e.g. API errors), so it wraps.
+	for idx, line := range lines {
+		lines[idx] = ansi.Wrap(line, width, "")
+	}
 	lines = append(lines, base)
 	return statusBarStyle.Render(strings.Join(lines, "\n"))
 }
@@ -1107,12 +1182,16 @@ func wrapText(value string, width int) []string {
 }
 
 func (m Model) visibleTracks(height int) (tracks []db.Track, offset int, hiddenAbove bool, hiddenBelow bool) {
+	// Below the 3 heading lines, each track takes 2 lines.
 	availableLines := max(2, height-3)
-	maxVisible := max(1, availableLines/2)
-
-	if len(m.tracks) <= maxVisible {
+	if len(m.tracks) <= availableLines/2 {
 		return m.tracks, 0, false, false
 	}
+
+	// Scrolling adds an "... N earlier" and/or "... N more" line. Reserve
+	// both so the window keeps one size while scrolling and never grows the
+	// pane past its height.
+	maxVisible := max(1, (availableLines-2)/2)
 
 	start := m.selectedIndex - maxVisible/2
 	if start < 0 {

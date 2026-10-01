@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/plei99/classical-piano-tracker/internal/db"
 	"github.com/plei99/classical-piano-tracker/internal/syncer"
 )
@@ -856,4 +858,119 @@ func footerHasNotificationLine(rendered string, want string) bool {
 	}
 
 	return false
+}
+
+// TestViewFitsWindowAtEverySize guards the footer: every frame must fit the
+// window, at every scroll position, with the key help on its last lines.
+func TestViewFitsWindowAtEverySize(t *testing.T) {
+	t.Parallel()
+
+	tracks := make([]db.Track, 40)
+	for i := range tracks {
+		tracks[i] = db.Track{
+			ID:           int64(i + 1),
+			TrackName:    fmt.Sprintf("Piano Sonata No. %d in B-flat minor, Op. 35", i),
+			Artists:      `["Frédéric Chopin","Martha Argerich"]`,
+			LastPlayedAt: int64(1000 - i),
+		}
+	}
+	base := NewModel(nil, nil, nil)
+	loaded, _ := base.Update(newTracksLoadedMsg(tracks, nil))
+
+	states := map[string]func(Model) Model{
+		"browsing": func(m Model) Model { return m },
+		"editing":  func(m Model) Model { m.startRatingEditor(); m.draftOpinion = strings.Repeat("lyrical ", 40); return m },
+		"searching": func(m Model) Model {
+			m.searching = true
+			return m
+		},
+		"long error": func(m Model) Model {
+			m.statusMessage = "Sync failed: " + strings.Repeat("spotify: HTTP 503 upstream unavailable ", 6)
+			m.statusIsError = true
+			return m
+		},
+	}
+	for name, setup := range states {
+		for _, width := range []int{50, 60, 80, 89, 90, 100, 120, 160} {
+			for _, height := range []int{16, 20, 24, 30, 48} {
+				for _, selected := range []int{0, 1, 7, 20, 38, 39} {
+					m := loaded.(Model)
+					m.width, m.height, m.selectedIndex = width, height, selected
+					m = setup(m)
+
+					view := m.View().Content
+					lines := strings.Split(view, "\n")
+					if len(lines) > height {
+						t.Fatalf("%s %dx%d sel=%d: %d lines, want <= %d", name, width, height, selected, len(lines), height)
+					}
+					for _, line := range lines {
+						if got := ansi.StringWidth(line); got > width {
+							t.Fatalf("%s %dx%d sel=%d: line width %d > %d: %q", name, width, height, selected, got, width, ansi.Strip(line))
+						}
+					}
+					footer := ansi.Strip(m.footerView())
+					footerLines := strings.Split(footer, "\n")
+					lastHint := strings.TrimSpace(footerLines[len(footerLines)-1])
+					if !strings.Contains(ansi.Strip(view), lastHint) {
+						t.Fatalf("%s %dx%d sel=%d: footer %q missing from view", name, width, height, selected, lastHint)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestVisibleTracksLeavesRoomForScrollHints(t *testing.T) {
+	t.Parallel()
+
+	model := Model{tracks: make([]db.Track, 30)}
+	for height := 5; height <= 40; height++ {
+		for selected := range model.tracks {
+			model.selectedIndex = selected
+			visible, _, hiddenAbove, hiddenBelow := model.visibleTracks(height)
+			lines := 3 + 2*len(visible)
+			if hiddenAbove {
+				lines++
+			}
+			if hiddenBelow {
+				lines++
+			}
+			if lines > max(height, 3+2+2) {
+				t.Fatalf("height=%d selected=%d: list needs %d lines", height, selected, lines)
+			}
+		}
+	}
+}
+
+func TestViewDropsBodyWhenWindowHasNoRoomForIt(t *testing.T) {
+	t.Parallel()
+
+	tracks := []db.Track{{ID: 1, TrackName: "One", Artists: `["A"]`, LastPlayedAt: 1}}
+	model := NewModel(nil, nil, nil)
+	updated, _ := model.Update(newTracksLoadedMsg(tracks, nil))
+	m := updated.(Model)
+	m.width, m.height = 30, 10
+
+	view := m.View().Content
+	if got := lipgloss.Height(view); got > m.height {
+		t.Fatalf("View() height = %d, want <= %d:\n%s", got, m.height, ansi.Strip(view))
+	}
+	if !strings.Contains(ansi.Strip(view), "q: quit") {
+		t.Fatalf("View() = %q, want the footer", ansi.Strip(view))
+	}
+}
+
+func TestFooterWrapsHintsToWidth(t *testing.T) {
+	t.Parallel()
+
+	model := Model{width: 50}
+	footer := ansi.Strip(model.footerView())
+	for _, line := range strings.Split(footer, "\n") {
+		if ansi.StringWidth(line) > 48 {
+			t.Fatalf("footer line %q is wider than the frame", line)
+		}
+	}
+	if !strings.Contains(footer, "j/k or arrows: move") || !strings.Contains(footer, "q: quit") {
+		t.Fatalf("footer = %q, want every hint kept whole", footer)
+	}
 }

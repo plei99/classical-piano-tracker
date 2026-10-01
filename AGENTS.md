@@ -3,10 +3,8 @@
 Welcome. If you are an AI agent working on this repository, strictly adhere to the rules below.
 
 ## Context & Stack
-This project is a CLI/TUI application for tracking Spotify classical piano listening history. 
-**It is built exclusively in Go.**
+This project is a CLI/TUI application for tracking Spotify classical piano listening history. It is currently written in Go.
 
-*   **DO NOT** use Python, Node.js, or any other language for the core application. We recently pivoted away from Python.
 *   **CLI**: `cobra`
 *   **TUI**: `bubbletea` and `lipgloss`
 *   **Database**: SQLite via `modernc.org/sqlite` (DO NOT use CGO/mattn).
@@ -26,4 +24,4 @@ Maintain the following standard Go project layout:
 3. **Database**: The `tracks` table must be unique by `spotify_id`. Use `UPSERT` (e.g., `ON CONFLICT (spotify_id) DO UPDATE...`) to handle play count increments and timestamp updates. Do not log duplicate listens as new rows.
 4. **TUI**: Keep network calls and DB writes asynchronous in Bubbletea using `tea.Cmd`. Do not block the `Update` loop.
 
-Consult `README.md` for full architectural details.
+Consult `README.md` for full architectural details (at current).

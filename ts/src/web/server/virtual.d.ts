@@ -5,3 +5,10 @@ declare module 'virtual:web-assets' {
   const assets: import('./server').WebAssets;
   export default assets;
 }
+
+// The page renderer (page.tsx and React's server renderer) as CommonJS
+// source, evaluated by `tracker web` only; see scripts/build.mjs.
+declare module 'virtual:web-page' {
+  const code: string;
+  export default code;
+}

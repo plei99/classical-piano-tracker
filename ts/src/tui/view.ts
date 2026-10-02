@@ -4,7 +4,7 @@
  * `frame.tsx` draw. Keeping it pure lets tests inspect layout without a
  * terminal. The geometry follows the Go Lip Gloss layout cell for cell.
  */
-import { textFor, type Model } from '../app/model';
+import type { ListRow, Model } from '../app/model';
 import {
   EDITOR_HELP,
   formatTime,
@@ -24,7 +24,6 @@ import {
   status,
   trackListSummary,
 } from '../app/presenter';
-import type { Track } from '../core/model';
 import {
   clipLine,
   expandTabs,
@@ -284,7 +283,7 @@ function clampPaneHeight(height: number, availableHeight: number): number {
 
 /** The slice of the filtered list shown in the list pane. */
 export interface VisibleTracks {
-  readonly tracks: readonly Track[];
+  readonly rows: readonly ListRow[];
   readonly offset: number;
   readonly hiddenAbove: boolean;
   readonly hiddenBelow: boolean;
@@ -297,9 +296,9 @@ export interface VisibleTracks {
 export function visibleTracks(m: Model, height: number): VisibleTracks {
   // Below the 3 heading lines, each track takes 2 lines.
   const availableLines = Math.max(2, height - 3);
-  const count = m.tracks.length;
+  const { count } = m.list;
   if (count <= Math.floor(availableLines / 2)) {
-    return { tracks: m.tracks, offset: 0, hiddenAbove: false, hiddenBelow: false };
+    return { rows: rowsBetween(m, 0, count), offset: 0, hiddenAbove: false, hiddenBelow: false };
   }
 
   // Scrolling adds an "... N earlier" and/or "... N more" line. Reserve both
@@ -311,22 +310,34 @@ export function visibleTracks(m: Model, height: number): VisibleTracks {
     start = count - maxVisible;
   }
   const end = start + maxVisible;
-  return { tracks: m.tracks.slice(start, end), offset: start, hiddenAbove: start > 0, hiddenBelow: end < count };
+  return { rows: rowsBetween(m, start, end), offset: start, hiddenAbove: start > 0, hiddenBelow: end < count };
+}
+
+/** The TUI's list is in memory, so every row in range is loaded. */
+function rowsBetween(m: Model, start: number, end: number): ListRow[] {
+  const rows: ListRow[] = [];
+  for (let index = start; index < end; index++) {
+    const row = m.list.row(index);
+    if (row !== null) {
+      rows.push(row);
+    }
+  }
+  return rows;
 }
 
 function renderList(m: Model, width: number, height: number): Line[] {
   const lines: Line[] = [styled('Tracks', TITLE), styled(trackListSummary(m), MUTED), BLANK];
 
-  const { tracks, offset, hiddenAbove, hiddenBelow } = visibleTracks(m, height);
+  const { rows, offset, hiddenAbove, hiddenBelow } = visibleTracks(m, height);
   if (hiddenAbove) {
     lines.push(styled(`... ${offset} earlier`, MUTED));
   }
 
   const titleWidth = Math.max(10, width - 8);
   const artistWidth = Math.max(10, width - 6);
-  for (const [index, track] of tracks.entries()) {
+  for (const [index, { track, artists }] of rows.entries()) {
     const line = `${String(track.id).padStart(2)}  ${fit(track.trackName, titleWidth)}`;
-    const subtitle = `    ${fit(textFor(m, track).artists, artistWidth)}`;
+    const subtitle = `    ${fit(artists, artistWidth)}`;
     if (offset + index === m.selectedIndex) {
       // Lip Gloss pads the highlight by one cell on each side.
       const pad = { text: ' ', style: SELECTED_ROW };
@@ -338,7 +349,7 @@ function renderList(m: Model, width: number, height: number): Line[] {
   }
 
   if (hiddenBelow) {
-    lines.push(styled(`... ${m.tracks.length - (offset + tracks.length)} more`, MUTED));
+    lines.push(styled(`... ${m.list.count - (offset + rows.length)} more`, MUTED));
   }
   return lines;
 }

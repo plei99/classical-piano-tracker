@@ -2,10 +2,12 @@
  * Album art, fetched lazily for the rows on screen and the selected track.
  * Requests from many rows in the same frame are batched (Spotify looks up at
  * most 50 tracks per call) and each ID is asked for once per page load.
+ * Art the server already knew arrives with the rows (`ViewRow.art`) and is
+ * seeded here, so those tracks need no request at all.
  */
-import { useSyncExternalStore } from 'react';
+import { createContext, useContext, useSyncExternalStore } from 'react';
 
-import { API, ARTWORK_BATCH, type Artwork, type ArtworkResponse } from '../api';
+import { API, ARTWORK_BATCH, type Artwork, type ArtworkResponse, type ViewRow } from '../api';
 
 type Listener = () => void;
 
@@ -25,6 +27,21 @@ export class ArtworkStore {
   /** Art for a track: undefined while unknown, null when Spotify has none. */
   get(spotifyId: string): Artwork | null | undefined {
     return this.art.get(spotifyId);
+  }
+
+  /** Records art the server sent with rows, notifying the page if any of it is new. */
+  seed(rows: Iterable<Pick<ViewRow, 'track' | 'art'>>): void {
+    let added = false;
+    for (const { track, art } of rows) {
+      if (art !== undefined && !this.art.has(track.spotifyId)) {
+        this.art.set(track.spotifyId, art);
+        this.requested.add(track.spotifyId);
+        added = true;
+      }
+    }
+    if (added) {
+      this.notify();
+    }
   }
 
   /** Asks for art for these tracks unless already known or on the way. */
@@ -75,6 +92,10 @@ export class ArtworkStore {
       }
       return;
     }
+    this.notify();
+  }
+
+  private notify(): void {
     this.version++;
     for (const listener of this.listeners) {
       listener();
@@ -84,8 +105,12 @@ export class ArtworkStore {
 
 export const artworkStore = new ArtworkStore();
 
+/** The page's store; the server renders each page with its own, seeded from that page's rows. */
+export const ArtworkContext = createContext<ArtworkStore>(artworkStore);
+
 /** Re-renders the caller when new art arrives; returns the store for lookups. */
-export function useArtworkStore(store: ArtworkStore = artworkStore): ArtworkStore {
+export function useArtworkStore(): ArtworkStore {
+  const store = useContext(ArtworkContext);
   useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
   return store;
 }

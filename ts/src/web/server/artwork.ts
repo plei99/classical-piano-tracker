@@ -61,6 +61,8 @@ export interface ArtworkServiceOptions {
 /** What the HTTP layer needs; ArtworkService implements it. */
 export interface ArtworkLookup {
   lookup(ids: readonly string[]): Promise<ArtworkResponse>;
+  /** Art already settled in the cache (null: Spotify has none), or undefined when unknown. Never fetches. */
+  known?(id: string): Artwork | null | undefined;
 }
 
 export class ArtworkService implements ArtworkLookup {
@@ -94,6 +96,10 @@ export class ArtworkService implements ArtworkLookup {
     this.apiLimit = new Limiter(concurrency);
     this.oembedLimit = new Limiter(concurrency);
     this.cache = options.cachePath === null ? new Map() : readCache(options.cachePath);
+  }
+
+  known(id: string): Artwork | null | undefined {
+    return this.cache.get(id);
   }
 
   /**

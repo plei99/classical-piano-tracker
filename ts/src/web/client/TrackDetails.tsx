@@ -28,6 +28,19 @@ export function TrackDetails({
 }) {
   const store = useArtworkStore();
   const shown = details(model);
+  if (shown === null && model.list.count > 0) {
+    // The selected row is still on its way (a jump to the end of a long list).
+    return (
+      <section className="pane pane--detail" aria-label="Track details" aria-busy="true">
+        <div className="hero">
+          <div className="cover cover--large cover--empty hero__cover" aria-hidden="true" />
+          <div className="hero__text">
+            <h2 className="hero__title muted">Loading...</h2>
+          </div>
+        </div>
+      </section>
+    );
+  }
   if (shown === null) {
     return (
       <section className="pane pane--detail" aria-label="Track details">

@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process';
 
 import { wrap } from '../core/errors';
-import type { WebAssets, WebServer, WebServerOptions } from '../web/server';
+import type { PageRenderer, WebAssets, WebServer, WebServerOptions } from '../web/server';
 import { type Context, withDb } from './context';
 import { tuiSync } from './tui_cmd';
 
@@ -16,6 +16,8 @@ export const DEFAULT_WEB_PORT = 8765;
 /** Seams that tests replace: nothing here may reach a real browser, signal, or build artifact. */
 export interface WebCommandDeps {
   loadAssets: () => Promise<WebAssets>;
+  /** The server-side page renderer (GET /). */
+  loadPage: () => Promise<PageRenderer>;
   startServer: (options: WebServerOptions) => Promise<WebServer>;
   openBrowser: (url: string) => void;
   /** Resolves on Ctrl+C or SIGTERM; stops listening once `done` aborts. */
@@ -35,6 +37,7 @@ export function defaultWebDeps(): WebCommandDeps {
   return {
     // Provided by scripts/build.mjs; only the bundled binary can resolve it.
     loadAssets: async () => (await import('virtual:web-assets')).default,
+    loadPage: async () => evaluatePage((await import('virtual:web-page')).default),
     startServer: async (options) => (await import('../web/server')).startWebServer(options),
     openBrowser,
     waitForShutdown,
@@ -53,8 +56,10 @@ export async function runWebCommand(
   const configPath = ctx.opts.resolveConfigPath();
   const databasePath = ctx.opts.resolveDbPath();
   let assets: WebAssets;
+  let renderPage: PageRenderer;
   try {
     assets = await deps.loadAssets();
+    renderPage = await deps.loadPage();
   } catch (err) {
     throw wrap('load web UI assets (run the bundled build)', err);
   }
@@ -70,6 +75,7 @@ export async function runWebCommand(
       server = await deps.startServer({
         db,
         assets,
+        renderPage,
         artwork,
         port,
         sync: () => tuiSync(configPath, db, 'the web UI'),
@@ -111,6 +117,20 @@ export async function runWebCommand(
       ctx.out.write(`${ALL_TABS_CLOSED_TEXT}\n`);
     }
   });
+}
+
+/**
+ * Runs the page renderer chunk (CommonJS source from scripts/build.mjs). It
+ * is kept out of the CLI bundle's code because parsing React's server
+ * renderer would slow every command's startup, not just `tracker web`.
+ */
+function evaluatePage(code: string): PageRenderer {
+  const module: { exports: { renderPage?: PageRenderer } } = { exports: {} };
+  new Function('module', 'exports', code)(module, module.exports);
+  if (module.exports.renderPage === undefined) {
+    throw new Error('the page renderer chunk has no renderPage');
+  }
+  return module.exports.renderPage;
 }
 
 /**

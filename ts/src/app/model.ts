@@ -5,25 +5,54 @@
  * described by commands (`Cmd`) that the front end runs and whose results
  * come back as messages.
  */
-import { formatArtists } from '../core/artists';
 import { errorMessage } from '../core/errors';
 import { emptySyncStats } from '../core/model';
 import type { Rating, SyncStats, Track, UpsertRatingParams } from '../core/model';
+import {
+  buildTrackText,
+  type ListChunk,
+  LocalTrackList,
+  type ListRow,
+  type SortMode,
+  sortModeCycle,
+  type TrackList,
+  type TrackText,
+} from './list';
 import { dropLastRune } from './strings';
+
+export { buildTrackText, type ListRow, type SortMode, sortModeCycle, type TrackList, type TrackText };
 
 /**
  * I/O callbacks injected by the CLI, so the TUI never touches the network
  * or the database directly and never blocks a render on them.
  */
 export interface Deps {
+  /** Reads every track and rating; the model sorts and filters them in-process (the TUI). */
   load(): Promise<{ tracks: Track[]; ratings: Rating[] }>;
   sync(): Promise<SyncStats>;
   saveRating(params: UpsertRatingParams): Promise<Rating>;
+  /**
+   * Front ends whose library lives elsewhere (the web UI): asks for the
+   * list in an order and filter, positioned at a track. When present it
+   * replaces `load`, and re-sorting and searching become requests too.
+   */
+  view?(request: ViewRequest): Promise<ViewResult>;
 }
 
-export type SortMode = 'recentDesc' | 'idAsc' | 'topPlayed' | 'unratedFirst';
+export interface ViewRequest {
+  readonly sort: SortMode;
+  readonly query: string;
+  /** The track to keep selected, or 0 for none. */
+  readonly around: number;
+  /** Re-read the library first (the r key); a sync re-reads it on its own. */
+  readonly reload: boolean;
+}
 
-export const sortModeCycle: readonly SortMode[] = ['recentDesc', 'idAsc', 'topPlayed', 'unratedFirst'];
+export interface ViewResult {
+  readonly list: TrackList;
+  /** Where `around` is in the list, or null when it is not there. */
+  readonly index: number | null;
+}
 
 const sortModeLabels: Record<SortMode, string> = {
   recentDesc: 'recent',
@@ -31,14 +60,6 @@ const sortModeLabels: Record<SortMode, string> = {
   topPlayed: 'top played',
   unratedFirst: 'unrated first',
 };
-
-/** Strings derived from a track's artists JSON, computed once per load. */
-export interface TrackText {
-  /** Display label, e.g. "Frédéric Chopin, Krystian Zimerman". */
-  readonly artists: string;
-  /** Lowercased name, artists, and album for substring search. */
-  readonly search: string;
-}
 
 /**
  * The root TUI state. Treated as immutable: `update` returns a new object
@@ -55,25 +76,18 @@ export interface Model {
   savingRating: boolean;
   searching: boolean;
   searchQuery: string;
-  allTracks: readonly Track[];
-  tracks: readonly Track[];
   /**
-   * Loaded alongside the tracks so moving the selection is a map lookup
-   * rather than a DB round trip per keypress.
+   * The tracks on screen, sorted by `sortMode` and filtered by
+   * `searchQuery`, with their ratings (so moving the selection is a lookup
+   * rather than a DB round trip per keypress). A remote list catches up
+   * with the sort and query when the server answers.
    */
-  ratings: ReadonlyMap<number, Rating>;
-  /**
-   * Caches strings derived from each track's artists JSON so rendering and
-   * search never re-decode it per frame or per keystroke.
-   */
-  trackText: ReadonlyMap<number, TrackText>;
+  list: TrackList;
   sortMode: SortMode;
-  /**
-   * allTracks is already ordered by sortedBy when sorted is true, letting
-   * search keystrokes skip a full re-sort.
-   */
-  sortedBy: SortMode;
-  sorted: boolean;
+  /** The latest list request to the server; answers to older ones are dropped. */
+  listRequest: number;
+  /** Whether that request is still unanswered. */
+  listPending: boolean;
   selectedIndex: number;
   editingRating: boolean;
   /**
@@ -107,9 +121,22 @@ export interface TracksLoadedMsg {
   readonly err?: Error;
 }
 
+/** The server's answer to a list request (`Deps.view`). */
+export interface ListLoadedMsg {
+  readonly type: 'listLoaded';
+  /** The request's `listRequest` number. */
+  readonly seq: number;
+  readonly reload: boolean;
+  readonly result?: ViewResult;
+  readonly err?: Error;
+}
+
 export type Msg =
   | { readonly type: 'resize'; readonly width: number; readonly height: number }
   | TracksLoadedMsg
+  | ListLoadedMsg
+  /** More rows of a remote list, fetched ahead of the selection and scroll position. */
+  | { readonly type: 'listRows'; readonly chunk: ListChunk }
   | { readonly type: 'syncFinished'; readonly stats: SyncStats; readonly err?: Error }
   | { readonly type: 'ratingSaved'; readonly trackId: number; readonly rating?: Rating; readonly err?: Error }
   | KeyMsg
@@ -154,13 +181,10 @@ export function makeModel(fields: Partial<Model> = {}): Model {
     savingRating: false,
     searching: false,
     searchQuery: '',
-    allTracks: [],
-    tracks: [],
-    ratings: emptyRatings,
-    trackText: emptyTrackText,
+    list: LocalTrackList.empty,
     sortMode: 'recentDesc',
-    sortedBy: 'recentDesc',
-    sorted: false,
+    listRequest: 0,
+    listPending: false,
     selectedIndex: 0,
     editingRating: false,
     editingOpinion: false,
@@ -179,9 +203,19 @@ export function newModel(deps: Partial<Deps>, fields: Partial<Model> = {}): Mode
   return makeModel({ deps, loadingTracks: true, ...fields });
 }
 
-/** The command that starts the program: an asynchronous DB read. */
-export function init(m: Model): Cmd {
-  return loadTracksCmd(m);
+/**
+ * Starts the program: an asynchronous read of the library, unless the
+ * model already has one (the web UI starts from the server's first render).
+ */
+export function init(m: Model): [Model, Cmd | null] {
+  if (!m.loadingTracks) {
+    return [m, null];
+  }
+  if (m.deps.view === undefined) {
+    return [m, loadTracksCmd(m)];
+  }
+  const next = { ...m };
+  return [next, loadTracksCmd(next)];
 }
 
 export function update(m: Model, msg: Msg): [Model, Cmd | null] {
@@ -196,12 +230,50 @@ export function update(m: Model, msg: Msg): [Model, Cmd | null] {
       }
       const selectedTrackId = selectedTrackID(m);
       next.err = null;
-      next.allTracks = msg.tracks;
-      next.ratings = msg.ratings;
-      next.trackText = msg.trackText;
-      next.sorted = false;
-      refreshTrackList(next, selectedTrackId);
+      next.list = LocalTrackList.load(msg.tracks, msg.ratings, msg.trackText);
+      return [next, refreshTrackList(next, selectedTrackId)];
+    }
+    case 'listLoaded': {
+      if (msg.seq !== m.listRequest) {
+        // Superseded: a later sort, search, or reload decides what is shown.
+        return [m, null];
+      }
+      const next = { ...m, listPending: false, loadingTracks: false };
+      if (msg.err !== undefined || msg.result === undefined) {
+        const err = msg.err ?? new Error('no list in the response');
+        if (msg.reload) {
+          next.err = err;
+        } else {
+          setStatus(next, err.message, true);
+        }
+        return [next, null];
+      }
+      const { list, index } = msg.result;
+      next.err = null;
+      next.list = list;
+      // Keep the selection if it moved while the request was in flight and
+      // its track is still here; otherwise take the server's position for
+      // the track selected when the request was made.
+      const current = selectedTrack(m);
+      const found = current === null ? -1 : list.indexOf(current.id);
+      selectIndex(next, found >= 0 ? found : index);
       return [next, null];
+    }
+    case 'listRows': {
+      const merged = m.list.withRows?.(msg.chunk);
+      if (merged === undefined || merged === m.list) {
+        return [m, null];
+      }
+      if (merged === null) {
+        // The library changed under the cached rows: refetch the list
+        // around the selection, showing the old rows until it arrives.
+        if (m.listPending) {
+          return [m, null];
+        }
+        const next = { ...m };
+        return [next, listCmd(next, selectedTrackID(m), false)];
+      }
+      return [{ ...m, list: merged }, null];
     }
     case 'syncFinished': {
       const next = { ...m, syncing: false };
@@ -216,7 +288,7 @@ export function update(m: Model, msg: Msg): [Model, Cmd | null] {
         false,
       );
       next.loadingTracks = true;
-      return [next, loadTracksCmd(next)];
+      return [next, loadTracksCmd(next, false)];
     }
     case 'ratingSaved': {
       const next = { ...m, savingRating: false };
@@ -224,18 +296,15 @@ export function update(m: Model, msg: Msg): [Model, Cmd | null] {
         setStatus(next, `Save failed: ${msg.err.message}`, true);
         return [next, null];
       }
+      let cmd: Cmd | null = null;
       if (msg.rating !== undefined) {
-        // Copy before writing: the previous model may still be rendered.
-        const ratings = new Map(m.ratings);
-        ratings.set(msg.trackId, msg.rating);
-        next.ratings = ratings;
+        next.list = m.list.withRating(msg.trackId, msg.rating);
         if (next.sortMode === 'unratedFirst') {
-          next.sorted = false;
-          refreshTrackList(next, msg.trackId);
+          cmd = refreshTrackList(next, msg.trackId);
         }
         setStatus(next, `Saved ${msg.rating.stars}/5 rating for track ${msg.trackId}`, false);
       }
-      return [next, null];
+      return [next, cmd];
     }
     case 'key':
       if (m.editingRating) {
@@ -253,8 +322,7 @@ export function update(m: Model, msg: Msg): [Model, Cmd | null] {
       if (m.searching) {
         const next = { ...m, searchQuery: m.searchQuery + msg.text };
         clearStatus(next);
-        refreshTrackList(next, selectedTrackID(m));
-        return [next, null];
+        return [next, refreshTrackList(next, selectedTrackID(m))];
       }
       return [m, null];
     case 'quit':
@@ -263,7 +331,7 @@ export function update(m: Model, msg: Msg): [Model, Cmd | null] {
       if (m.syncing || m.savingRating || m.editingRating) {
         return [m, null];
       }
-      const index = m.tracks.findIndex((track) => track.id === msg.trackId);
+      const index = m.list.indexOf(msg.trackId);
       return [index < 0 ? m : moveSelectionTo(m, index), null];
     }
     case 'setSearch': {
@@ -272,8 +340,7 @@ export function update(m: Model, msg: Msg): [Model, Cmd | null] {
       }
       const next = { ...m, searchQuery: msg.query };
       clearStatus(next);
-      refreshTrackList(next, selectedTrackID(m));
-      return [next, null];
+      return [next, refreshTrackList(next, selectedTrackID(m))];
     }
     case 'setDraftStars':
       if (!m.editingRating || !Number.isInteger(msg.stars) || msg.stars < 0 || msg.stars > 5) {
@@ -289,7 +356,8 @@ export function update(m: Model, msg: Msg): [Model, Cmd | null] {
 
 function handleBrowsingKey(m: Model, msg: KeyMsg): [Model, Cmd | null] {
   const busy = m.syncing || m.savingRating;
-  const last = m.tracks.length - 1;
+  const count = m.list.count;
+  const last = count - 1;
   switch (msg.key) {
     case 'q':
     case 'ctrl+c':
@@ -313,13 +381,12 @@ function handleBrowsingKey(m: Model, msg: KeyMsg): [Model, Cmd | null] {
       return [next, syncCmd(next)];
     }
     case 'o': {
-      if (m.tracks.length === 0 || busy) {
+      if (count === 0 || busy) {
         return [m, null];
       }
       const next = { ...m };
       clearStatus(next);
-      cycleSortMode(next);
-      return [next, null];
+      return [next, cycleSortMode(next)];
     }
     case '/': {
       if (busy) {
@@ -335,8 +402,7 @@ function handleBrowsingKey(m: Model, msg: KeyMsg): [Model, Cmd | null] {
       }
       const next = { ...m, searchQuery: '' };
       clearStatus(next);
-      refreshTrackList(next, selectedTrackID(m));
-      return [next, null];
+      return [next, refreshTrackList(next, selectedTrackID(m))];
     }
     case 'e':
     case 'enter': {
@@ -347,25 +413,25 @@ function handleBrowsingKey(m: Model, msg: KeyMsg): [Model, Cmd | null] {
     }
     case 'up':
     case 'k':
-      if (m.tracks.length === 0 || m.selectedIndex === 0 || busy) {
+      if (count === 0 || m.selectedIndex === 0 || busy) {
         return [m, null];
       }
       return [moveSelectionTo(m, m.selectedIndex - 1), null];
     case 'down':
     case 'j':
-      if (m.tracks.length === 0 || m.selectedIndex >= last || busy) {
+      if (count === 0 || m.selectedIndex >= last || busy) {
         return [m, null];
       }
       return [moveSelectionTo(m, m.selectedIndex + 1), null];
     case 'g':
     case 'home':
-      if (m.tracks.length === 0 || m.selectedIndex === 0 || busy) {
+      if (count === 0 || m.selectedIndex === 0 || busy) {
         return [m, null];
       }
       return [moveSelectionTo(m, 0), null];
     case 'G':
     case 'end':
-      if (m.tracks.length === 0 || m.selectedIndex >= last || busy) {
+      if (count === 0 || m.selectedIndex >= last || busy) {
         return [m, null];
       }
       return [moveSelectionTo(m, last), null];
@@ -386,8 +452,7 @@ function handleSearchKey(m: Model, msg: KeyMsg): [Model, Cmd | null] {
     case 'esc': {
       const next = { ...m, searching: false, searchQuery: '' };
       clearStatus(next);
-      refreshTrackList(next, selectedTrackID(m));
-      return [next, null];
+      return [next, refreshTrackList(next, selectedTrackID(m))];
     }
     case 'backspace':
       query = dropLastRune(m.searchQuery);
@@ -406,8 +471,7 @@ function handleSearchKey(m: Model, msg: KeyMsg): [Model, Cmd | null] {
   }
   const next = { ...m, searchQuery: query };
   clearStatus(next);
-  refreshTrackList(next, selectedTrackID(m));
-  return [next, null];
+  return [next, refreshTrackList(next, selectedTrackID(m))];
 }
 
 function handleRatingEditorKey(m: Model, msg: KeyMsg): [Model, Cmd | null] {
@@ -464,14 +528,18 @@ function handleRatingEditorKey(m: Model, msg: KeyMsg): [Model, Cmd | null] {
   return [m, null];
 }
 
+/** The selected row, or null when nothing is selected or (remote lists) its row is still loading. */
+export function selectedRow(m: Model): ListRow | null {
+  return m.list.row(m.selectedIndex);
+}
+
 export function selectedTrack(m: Model): Track | null {
-  return m.tracks[m.selectedIndex] ?? null;
+  return selectedRow(m)?.track ?? null;
 }
 
 /** The saved rating for the selected track, if any. */
 export function selectedRating(m: Model): Rating | null {
-  const track = selectedTrack(m);
-  return track === null ? null : (m.ratings.get(track.id) ?? null);
+  return selectedRow(m)?.rating ?? null;
 }
 
 /** The selected track's ID, or 0 (never a real ID) when nothing is selected. */
@@ -480,10 +548,11 @@ export function selectedTrackID(m: Model): number {
 }
 
 function moveSelectionTo(m: Model, index: number): Model {
-  if (m.tracks.length === 0) {
+  const { count } = m.list;
+  if (count === 0) {
     return m;
   }
-  const clamped = Math.min(Math.max(index, 0), m.tracks.length - 1);
+  const clamped = Math.min(Math.max(index, 0), count - 1);
   if (clamped === m.selectedIndex) {
     return m;
   }
@@ -492,8 +561,16 @@ function moveSelectionTo(m: Model, index: number): Model {
   return next;
 }
 
-/** Loads tracks and ratings, and precomputes display and search text off the update path. */
-export function loadTracksCmd(m: Model): Cmd {
+/**
+ * Loads tracks and ratings, and precomputes display and search text off the
+ * update path; or, for a remote list, asks the server (`reload` re-reads its
+ * library first). Takes a model the caller has just copied, as a remote
+ * request is numbered in it.
+ */
+export function loadTracksCmd(m: Model, reload = true): Cmd {
+  if (m.deps.view !== undefined) {
+    return listCmd(m, selectedTrackID(m), reload);
+  }
   const { load } = m.deps;
   return async () => {
     try {
@@ -581,69 +658,36 @@ function clearStatus(m: Model): void {
   m.statusIsError = false;
 }
 
-function cycleSortMode(m: Model): void {
+function cycleSortMode(m: Model): Cmd | null {
   const selectedTrackId = selectedTrackID(m);
   const index = sortModeCycle.indexOf(m.sortMode);
   m.sortMode = sortModeCycle[(index + 1) % sortModeCycle.length] ?? 'recentDesc';
-  refreshTrackList(m, selectedTrackId);
+  return refreshTrackList(m, selectedTrackId);
 }
 
-const byRecentDesc = (left: Track, right: Track): number =>
-  right.lastPlayedAt - left.lastPlayedAt || right.id - left.id;
-
-const byIdAsc = (left: Track, right: Track): number => left.id - right.id;
-
-const byTopPlayed = (left: Track, right: Track): number =>
-  right.playCount - left.playCount || byRecentDesc(left, right);
-
-function sortTracks(m: Model): void {
-  // Sort a copy: the previous model (and anything memoized from it) keeps
-  // its own order.
-  const tracks = m.allTracks.slice();
-  switch (m.sortMode) {
-    case 'idAsc':
-      tracks.sort(byIdAsc);
-      break;
-    case 'topPlayed':
-      tracks.sort(byTopPlayed);
-      break;
-    case 'unratedFirst': {
-      const { ratings } = m;
-      tracks.sort((left, right) => {
-        const leftRated = ratings.has(left.id);
-        if (leftRated !== ratings.has(right.id)) {
-          return leftRated ? 1 : -1;
-        }
-        return byRecentDesc(left, right);
-      });
-      break;
-    }
-    case 'recentDesc':
-      tracks.sort(byRecentDesc);
-      break;
+/**
+ * Re-sorts (only when needed) and re-filters, keeping `selectedTrackId`
+ * selected if it is still shown. In-memory lists change on the spot; a
+ * remote list returns the request that will.
+ */
+export function refreshTrackList(m: Model, selectedTrackId: number): Cmd | null {
+  const list = m.list.requery(m.sortMode, m.searchQuery);
+  if (list === null) {
+    return listCmd(m, selectedTrackId, false);
   }
-  m.allTracks = tracks;
-  m.sortedBy = m.sortMode;
-  m.sorted = true;
+  m.list = list;
+  selectIndex(m, list.indexOf(selectedTrackId));
+  return null;
 }
 
-/** Re-sorts (only when needed) and re-filters, keeping `selectedTrackId` selected if it is still shown. */
-export function refreshTrackList(m: Model, selectedTrackId: number): void {
-  if (m.allTracks.length === 0 && m.tracks.length > 0) {
-    m.allTracks = m.tracks;
-    m.sorted = false;
-  }
-  if (!m.sorted || m.sortedBy !== m.sortMode) {
-    sortTracks(m);
-  }
-  m.tracks = filterTracks(m, m.allTracks, m.searchQuery);
-  if (m.tracks.length === 0) {
+/** Selects `index` in a new list, or falls back to the top (closing the editor) when the track is gone. */
+function selectIndex(m: Model, index: number | null): void {
+  if (m.list.count === 0) {
     m.selectedIndex = 0;
     m.editingRating = false;
     return;
   }
-  const index = m.tracks.findIndex((track) => track.id === selectedTrackId);
-  if (index >= 0) {
+  if (index !== null && index >= 0 && index < m.list.count) {
     m.selectedIndex = index;
     return;
   }
@@ -651,64 +695,23 @@ export function refreshTrackList(m: Model, selectedTrackId: number): void {
   m.editingRating = false;
 }
 
-/**
- * Search text aligned index for index with a sorted track array, built on
- * that array's first search. A per-keystroke scan of a plain string array
- * is several times faster than looking each track up in `trackText`.
- * Track arrays are never mutated once built, so their identity keys the
- * cache, and a re-sort (a new array) starts a fresh entry.
- */
-const searchIndexes = new WeakMap<readonly Track[], readonly string[]>();
-
-function searchIndex(m: Model, tracks: readonly Track[]): readonly string[] {
-  let index = searchIndexes.get(tracks);
-  if (index === undefined) {
-    index = tracks.map((track) => textFor(m, track).search);
-    searchIndexes.set(tracks, index);
-  }
-  return index;
-}
-
-function filterTracks(m: Model, tracks: readonly Track[], query: string): readonly Track[] {
-  const needle = query.trim().toLowerCase();
-  if (needle === '') {
-    // Sharing is safe: arrays are never mutated after they are built.
-    return tracks;
-  }
-  const index = searchIndex(m, tracks);
-  const matches: Track[] = [];
-  for (let position = 0; position < index.length; position++) {
-    if (index[position]?.includes(needle) === true) {
-      matches.push(tracks[position] as Track);
+/** Asks the server for the list in the model's order and filter, around a track. */
+function listCmd(m: Model, around: number, reload: boolean): Cmd {
+  const seq = m.listRequest + 1;
+  m.listRequest = seq;
+  m.listPending = true;
+  const { view } = m.deps;
+  const request: ViewRequest = { sort: m.sortMode, query: m.searchQuery, around, reload };
+  return async () => {
+    try {
+      if (view === undefined) {
+        throw new Error('Loading tracks is unavailable in this view.');
+      }
+      return { type: 'listLoaded', seq, reload, result: await view(request) };
+    } catch (err) {
+      return { type: 'listLoaded', seq, reload, err: asError(err) };
     }
-  }
-  return matches;
-}
-
-export function buildTrackText(tracks: readonly Track[]): Map<number, TrackText> {
-  const texts = new Map<number, TrackText>();
-  for (const track of tracks) {
-    texts.set(track.id, newTrackText(track));
-  }
-  return texts;
-}
-
-function newTrackText(track: Track): TrackText {
-  const artists = formatArtists(track.artists);
-  return {
-    artists,
-    // NUL separators keep a pasted query from matching across fields.
-    search: `${track.trackName}\x00${artists}\x00${track.albumName}`.toLowerCase(),
   };
-}
-
-/** Falls back to decoding on a cache miss so hand-built models (tests) behave like loaded ones. */
-export function textFor(m: Model, track: Track): TrackText {
-  return m.trackText.get(track.id) ?? newTrackText(track);
-}
-
-export function totalTrackCount(m: Model): number {
-  return m.allTracks.length > 0 ? m.allTracks.length : m.tracks.length;
 }
 
 export function sortModeLabel(mode: SortMode): string {

@@ -58,7 +58,14 @@ export function useTracker(
   useEffect(() => {
     if (!started.current) {
       started.current = true;
-      void init(latest.current)().then(dispatch);
+      const [next, cmd] = init(latest.current);
+      if (next !== latest.current) {
+        latest.current = next;
+        setModel(next);
+      }
+      if (cmd !== null) {
+        void cmd().then(dispatch);
+      }
     }
   }, [dispatch]);
 

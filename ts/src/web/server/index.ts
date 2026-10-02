@@ -13,12 +13,13 @@ export {
   isSpotifyId,
   OEMBED_BASE_URL,
 } from './artwork';
+export { Library } from './library';
+export type { PageOptions, PageRenderer } from './page';
 export {
   CONTENT_SECURITY_POLICY,
   MAX_BODY_BYTES,
   PRESENCE_GRACE_MS,
   startWebServer,
-  TOKEN_PLACEHOLDER,
   type WebAssets,
   type WebServer,
   type WebServerOptions,

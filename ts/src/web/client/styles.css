@@ -276,6 +276,35 @@ textarea {
   color: color-mix(in srgb, var(--surface) 70%, var(--ink));
 }
 
+/* A row still on its way from the server: same box, blank bars. */
+.row--placeholder::before,
+.row--placeholder::after {
+  content: '';
+  grid-column: 3;
+  height: 0.75rem;
+  margin: 0.2rem 0;
+  border-radius: 3px;
+  background: var(--hover);
+}
+
+.row--placeholder::after {
+  width: 60%;
+}
+
+.row--placeholder .cover {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.row--placeholder[aria-selected='true'] {
+  background: var(--ink);
+}
+
+.row--placeholder[aria-selected='true']::before,
+.row--placeholder[aria-selected='true']::after {
+  background: color-mix(in srgb, var(--surface) 25%, var(--ink));
+}
+
 /* ---- Covers ---- */
 
 .cover {

@@ -2,10 +2,14 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Deps } from '../../app/model';
 import { NO_TRACKS_TEXT } from '../../app/presenter';
+import type { InitialData } from '../api';
+import { initialModel } from './initial';
 import { SERVER_STOPPED_TEXT, STOPPED_NOTICE_DELAY_MS, watchPresence, type PresenceStream } from './presence';
+import { pageParts } from './testkit';
 import { WebApp } from './WebApp';
+
+const emptyLibrary: InitialData = { view: { version: 1, total: 0, matched: 0, offset: 0, rows: [], index: null } };
 
 /** An EventSource the test opens, fails, and recovers by hand. */
 class FakeStream implements PresenceStream {
@@ -40,7 +44,7 @@ afterEach(() => {
 });
 
 describe('presence', () => {
-  it('is opened at page start, before the library request', async () => {
+  it('is opened at page start, and the page needs no request to show its first screen', async () => {
     const opened: string[] = [];
     vi.stubGlobal(
       'EventSource',
@@ -55,19 +59,18 @@ describe('presence', () => {
       'fetch',
       vi.fn(async (path: string) => {
         opened.push(`fetch ${path}`);
-        return new Response('{"tracks":[],"ratings":[]}', { headers: { 'Content-Type': 'application/json' } });
+        return new Response('{}', { headers: { 'Content-Type': 'application/json' } });
       }),
     );
     document.head.innerHTML = '<meta name="tracker-token" content="abc123">';
-    document.body.innerHTML = '<div id="root"></div>';
+    document.body.innerHTML = pageParts(emptyLibrary).body;
 
     await act(async () => {
       await import('./main');
     });
     await screen.findByText(NO_TRACKS_TEXT);
 
-    expect(opened[0]).toBe('presence /api/presence?token=abc123');
-    expect(opened).toContain('fetch /api/library');
+    expect(opened).toEqual(['presence /api/presence?token=abc123']);
   });
 
   it('reports the server stopped once the stream has been down for a second', () => {
@@ -107,13 +110,8 @@ describe('presence', () => {
       'fetch',
       vi.fn(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })),
     );
-    const deps: Deps = {
-      load: async () => ({ tracks: [], ratings: [] }),
-      sync: vi.fn(),
-      saveRating: vi.fn(),
-    };
     const { stream, presence } = watch();
-    render(<WebApp deps={deps} presence={presence} />);
+    render(<WebApp deps={{}} initialModel={initialModel(emptyLibrary, {})} presence={presence} />);
     const status = await screen.findByRole('status');
     expect([status.className, status.textContent]).toEqual(['status', '']);
 

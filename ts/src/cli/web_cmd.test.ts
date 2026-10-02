@@ -5,12 +5,13 @@ import { describe, expect, it } from 'vitest';
 
 import { API, PRESENCE_TOKEN_PARAM, TOKEN_HEADER } from '../web/api';
 import { startWebServer, type WebAssets } from '../web/server';
+import { renderPage } from '../web/server/page';
 import { Context, RootOptions } from './context';
 import { fakeOnboardingDeps, MemoryOut, run, tempDir } from './testutil';
 import { runWebCommand, type WebCommandDeps } from './web_cmd';
 
 const ASSETS: WebAssets = {
-  '/': { contentType: 'text/html; charset=utf-8', body: '<meta content="%TRACKER_TOKEN%">' },
+  '/assets/app.js': { contentType: 'text/javascript; charset=utf-8', body: 'console.log(1)' },
 };
 
 function context(): { ctx: Context; stdout: MemoryOut; configPath: string } {
@@ -41,6 +42,7 @@ function fakeDeps(
     opened,
     url: () => url,
     loadAssets: () => Promise.resolve(ASSETS),
+    loadPage: () => Promise.resolve(renderPage),
     startServer: async (options) => {
       const server = await startWebServer({ ...options, presenceGraceMs: GRACE_MS });
       url = server.url;
@@ -88,7 +90,7 @@ describe('tracker web', () => {
       `Serving the tracker web UI at ${url} (stops when you close the tab, or press Ctrl+C)\n`,
     );
     expect(deps.opened).toEqual([url]);
-    expect(page).toMatch(/^<meta content="[0-9a-f]{32}">$/);
+    expect(page).toMatch(/<meta name="tracker-token" content="[0-9a-f]{32}" \/>/);
     // Sync goes through the CLI's config path, with the hint naming the web UI.
     expect(syncError).toBe(
       `created default config at ${JSON.stringify(configPath)}; set spotify.client_id and spotify.client_secret, ` +

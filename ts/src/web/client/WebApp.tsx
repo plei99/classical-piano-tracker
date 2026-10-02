@@ -6,16 +6,17 @@
  */
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 
-import { selectedTrack, type Deps, type Msg } from '../../app/model';
+import { selectedTrack, type Deps, type Model, type Msg } from '../../app/model';
 import { LOADING_TEXT, NO_TRACKS_TEXT, SUBTITLE, TITLE, errorText, noMatchText, screen } from '../../app/presenter';
 import { useTracker } from '../../app/useTracker';
-import { useArtworkStore } from './artwork';
+import { ArtworkContext, useArtworkStore, type ArtworkStore } from './artwork';
+import type { RowsFetcher } from './fill';
 import { Footer } from './Footer';
 import { keyMessage } from './keys';
 import { usePlayer, type IFrameAPI } from './player';
 import type { Presence } from './presence';
 import { ThemeSwitch } from './ThemeSwitch';
-import { useTheme } from './theme';
+import { useTheme, type ThemeChoice } from './theme';
 import { TrackDetails } from './TrackDetails';
 import { TrackList } from './TrackList';
 
@@ -44,7 +45,12 @@ const TEXT_ENTRY =
   'textarea, select, input:not([type="radio"]):not([type="checkbox"]):not([type="button"]):not([type="submit"])';
 
 export interface WebAppProps {
-  deps: Partial<Deps>;
+  /** The model's I/O, plus `rows` to fetch more of a remote list. */
+  deps: Partial<Deps> & { rows?: RowsFetcher };
+  /** The state the page was rendered in; the server and the browser build it alike (initial.ts). */
+  initialModel: Model;
+  /** The theme the server rendered (from the cookie). */
+  initialTheme?: ThemeChoice;
   /** Injected in tests; defaults to Spotify's real embed script. */
   loadPlayer?: () => Promise<IFrameAPI>;
   /** Injected in tests; opens a spotify: URI in the desktop app. */
@@ -54,16 +60,34 @@ export interface WebAppProps {
 }
 
 const noPresence: Presence = { serverStopped: () => false, subscribe: () => () => {} };
+/** The server always renders a running server. */
+const serverRunning = () => false;
 
 const openInApp = (uri: string) => {
   window.location.href = uri;
 };
 
-export function WebApp({ deps, loadPlayer, openUri = openInApp, presence = noPresence }: WebAppProps) {
-  const { model, dispatch } = useTracker(deps);
-  const serverStopped = useSyncExternalStore(presence.subscribe, presence.serverStopped);
+/** The page root, rendered by the server and hydrated by the browser with the same props. */
+export function WebRoot({ store, ...props }: WebAppProps & { store: ArtworkStore }) {
+  return (
+    <ArtworkContext.Provider value={store}>
+      <WebApp {...props} />
+    </ArtworkContext.Provider>
+  );
+}
+
+export function WebApp({
+  deps,
+  initialModel,
+  initialTheme = 'auto',
+  loadPlayer,
+  openUri = openInApp,
+  presence = noPresence,
+}: WebAppProps) {
+  const { model, dispatch } = useTracker(deps, { initialModel });
+  const serverStopped = useSyncExternalStore(presence.subscribe, presence.serverStopped, serverRunning);
   const player = usePlayer(...(loadPlayer === undefined ? [] : [loadPlayer]));
-  const [theme, setTheme] = useTheme();
+  const [theme, setTheme] = useTheme(initialTheme);
   const searchRef = useRef<HTMLInputElement>(null);
   const store = useArtworkStore();
   const current = screen(model);
@@ -158,7 +182,7 @@ export function WebApp({ deps, loadPlayer, openUri = openInApp, presence = noPre
         {current === 'empty' && <p className="notice muted">{NO_TRACKS_TEXT}</p>}
         {(current === 'browse' || current === 'noMatch') && (
           <div className="panes">
-            <TrackList model={model} dispatch={send} searchRef={searchRef} />
+            <TrackList model={model} dispatch={send} searchRef={searchRef} {...(deps.rows && { rows: deps.rows })} />
             {current === 'browse' ? (
               <TrackDetails model={model} dispatch={send} player={player} />
             ) : (

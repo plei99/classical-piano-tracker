@@ -1,13 +1,17 @@
 /**
- * The local HTTP server behind `tracker web`: static assets plus the JSON
- * API from ../api.ts. It only ever serves the browser on this machine, so
- * the defenses target other web pages the user has open (DNS rebinding,
- * cross-site POSTs), not remote clients; see the security notes in api.ts.
+ * The local HTTP server behind `tracker web`: the server-rendered page,
+ * static assets, and the JSON API from ../api.ts, answered from its copy of
+ * the library (library.ts). It only ever serves the browser on this
+ * machine, so the defenses target other web pages the user has open (DNS
+ * rebinding, cross-site POSTs), not remote clients; see the security notes
+ * in api.ts.
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { gunzipSync } from 'node:zlib';
 
+import { isSortMode } from '../../app/list';
 import type { Db } from '../../core/db';
 import { errorMessage } from '../../core/errors';
 import type { Rating, SyncStats } from '../../core/model';
@@ -15,18 +19,32 @@ import {
   API,
   ARTWORK_BATCH,
   type ErrorResponse,
-  type LibraryResponse,
+  type InitialData,
   PRESENCE_TOKEN_PARAM,
+  type ReloadResponse,
   type SaveRatingRequest,
   TOKEN_HEADER,
+  VIEW_CHUNK,
+  VIEW_LIMIT_MAX,
+  type ViewResponse,
+  type ViewRow,
 } from '../api';
+import { themeFromCookies } from '../client/theme';
 import type { ArtworkLookup } from './artwork';
+import { compress, COMPRESS_MIN_BYTES, type Encoding, pickEncoding } from './compress';
+import { Library, type LibraryView, type ViewQuery } from './library';
+import type { PageRenderer } from './page';
 
-/** Static files keyed by URL path (`/`, `/assets/app.js`, ...). */
-export type WebAssets = Record<string, { contentType: string; body: string }>;
-
-/** Where the page receives its per-launch token; replaced on every `/` response. */
-export const TOKEN_PLACEHOLDER = '%TRACKER_TOKEN%';
+/**
+ * Static files keyed by URL path (`/assets/app.js`, ...). The build embeds
+ * only their gzip and brotli encodings (base64), which keeps the binary
+ * (and every command's startup) smaller; the plain body is then unzipped
+ * on the rare request that accepts neither. Tests give plain bodies.
+ */
+export type WebAsset = { contentType: string } & (
+  { body: string; gzip?: string; br?: string } | { body?: undefined; gzip: string; br?: string }
+);
+export type WebAssets = Record<string, WebAsset>;
 
 // Spotify's iFrame API loader (open.spotify.com) pulls its code from embed-cdn.spotifycdn.com, and that
 // code evaluates strings, so 'unsafe-eval' is required for in-page playback. It does not allow inline
@@ -51,6 +69,13 @@ const PRESENCE_PING_MS = 15_000;
 export interface WebServerOptions {
   db: Db;
   assets: WebAssets;
+  /**
+   * Renders GET / (page.tsx's renderPage). Passed in rather than imported:
+   * the binary carries it as a separate chunk, evaluated only by
+   * `tracker web`, so React's server renderer adds nothing to every other
+   * command's startup.
+   */
+  renderPage: PageRenderer;
   /** Runs one Spotify sync into `db`. */
   sync: () => Promise<SyncStats>;
   artwork: ArtworkLookup;
@@ -143,6 +168,8 @@ class TabPresence {
 
 type Route =
   | { method: 'GET' | 'POST'; handle: (req: IncomingMessage, url: URL) => unknown }
+  /** Answers with HTML instead of JSON. */
+  | { method: 'GET'; page: (req: IncomingMessage) => string }
   /** Answers with its own stream instead of a JSON body. */
   | { method: 'GET'; stream: (url: URL, res: ServerResponse) => void };
 
@@ -151,22 +178,80 @@ type Route =
  * (e.g. code EADDRINUSE) when the port cannot be bound.
  */
 export async function startWebServer(options: WebServerOptions): Promise<WebServer> {
+  const assets = prepareAssets(options.assets);
   const token = options.token ?? randomBytes(16).toString('hex');
   let port = 0;
   const presence = new TabPresence(options.presenceGraceMs ?? PRESENCE_GRACE_MS);
+  const library = new Library(options.db);
   /** One sync at a time: overlapping runs would both count plays before either saves the checkpoint. */
   let syncing: Promise<SyncStats> | null = null;
   const sync = (): Promise<SyncStats> => {
-    syncing ??= presence.work(options.sync).finally(() => {
-      syncing = null;
-    });
+    syncing ??= presence
+      .work(async () => {
+        const stats = await options.sync();
+        try {
+          library.reload();
+          setImmediate(() => library.warm());
+        } catch {
+          // The next request reads the library again and reports the error.
+          library.forget();
+        }
+        return stats;
+      })
+      .finally(() => {
+        syncing = null;
+      });
     return syncing;
   };
 
+  /** Adds the art the artwork cache already knows, so the page can skip asking for it. */
+  const viewResponse = (view: LibraryView): ViewResponse => ({
+    ...view,
+    rows: view.rows.map((row): ViewRow => {
+      const art = options.artwork.known?.(row.track.spotifyId);
+      return art === undefined ? { ...row } : { ...row, art };
+    }),
+  });
+
+  // Read the library right after startup, so the first page does not wait
+  // for it. The read is synchronous: a request that arrives first reads it
+  // itself (Library.view), and never sees a "Loading" screen.
+  setImmediate(() => {
+    try {
+      library.ensureLoaded();
+      setImmediate(() => library.warm());
+    } catch {
+      // Reported to the page that asks for the library.
+    }
+  });
+
   const routes: Record<string, Route> = {
-    [API.library]: {
+    '/': {
       method: 'GET',
-      handle: (): LibraryResponse => ({ tracks: options.db.listAllTracks(), ratings: options.db.listAllRatings() }),
+      page: (req) => {
+        let initial: InitialData;
+        try {
+          initial = {
+            view: viewResponse(library.view({ sort: 'recentDesc', query: '', offset: 0, limit: VIEW_CHUNK })),
+          };
+        } catch (err) {
+          initial = { error: errorMessage(err) };
+        }
+        return options.renderPage({ token, theme: themeFromCookies(req.headers.cookie), initial });
+      },
+    },
+    [API.view]: {
+      method: 'GET',
+      handle: (_req, url): ViewResponse => viewResponse(library.view(parseViewQuery(url.searchParams))),
+    },
+    [API.reload]: {
+      method: 'POST',
+      handle: async (req): Promise<ReloadResponse> => {
+        await readBody(req);
+        const reloaded = library.reload();
+        setImmediate(() => library.warm());
+        return reloaded;
+      },
     },
     [API.sync]: {
       method: 'POST',
@@ -183,7 +268,9 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
           if (options.db.trackById(params.trackId) === null) {
             throw new HttpError(404, `track ${params.trackId} not found`);
           }
-          return options.db.upsertRating(params);
+          const rating = options.db.upsertRating(params);
+          library.setRating(rating);
+          return rating;
         }),
     },
     [API.artwork]: {
@@ -218,6 +305,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const isApi = url.pathname === '/api' || url.pathname.startsWith('/api/');
+    const encoding = pickEncoding(req.headers['accept-encoding']);
     try {
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Referrer-Policy', 'no-referrer');
@@ -237,8 +325,8 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
         throw new HttpError(403, 'missing or invalid token');
       }
 
-      if (isApi) {
-        const route = routes[url.pathname];
+      const route = Object.hasOwn(routes, url.pathname) ? routes[url.pathname] : undefined;
+      if (isApi || route !== undefined) {
         if (route === undefined) {
           throw new HttpError(404, `no API route ${url.pathname}`);
         }
@@ -249,23 +337,25 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
           route.stream(url, res);
           return;
         }
+        if ('page' in route) {
+          const html = route.page(req);
+          send(res, 200, 'text/html; charset=utf-8', compressed(Buffer.from(html), encoding), 'no-store');
+          return;
+        }
         const body = await route.handle(req, url);
-        send(res, 200, 'application/json; charset=utf-8', JSON.stringify(body), 'no-store');
+        const json = Buffer.from(JSON.stringify(body));
+        send(res, 200, 'application/json; charset=utf-8', compressed(json, encoding), 'no-store');
         return;
       }
 
-      const asset = Object.hasOwn(options.assets, url.pathname) ? options.assets[url.pathname] : undefined;
+      const asset = Object.hasOwn(assets, url.pathname) ? assets[url.pathname] : undefined;
       if (asset === undefined) {
         throw new HttpError(404, '404 page not found');
       }
       if (method !== 'GET') {
         throw new HttpError(405, 'method not allowed', { Allow: 'GET' });
       }
-      if (url.pathname === '/') {
-        send(res, 200, asset.contentType, asset.body.replaceAll(TOKEN_PLACEHOLDER, token), 'no-store');
-      } else {
-        send(res, 200, asset.contentType, asset.body, ASSET_CACHE_CONTROL);
-      }
+      send(res, 200, asset.contentType, asset.encoded(encoding), ASSET_CACHE_CONTROL);
     } catch (err) {
       const failure = err instanceof HttpError ? err : new HttpError(500, errorMessage(err));
       for (const [name, value] of Object.entries(failure.headers)) {
@@ -277,9 +367,9 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
       }
       if (isApi) {
         const body: ErrorResponse = { error: failure.message };
-        send(res, failure.status, 'application/json; charset=utf-8', JSON.stringify(body), 'no-store');
+        send(res, failure.status, 'application/json; charset=utf-8', { body: JSON.stringify(body) }, 'no-store');
       } else {
-        send(res, failure.status, 'text/plain; charset=utf-8', `${failure.message}\n`, 'no-store');
+        send(res, failure.status, 'text/plain; charset=utf-8', { body: `${failure.message}\n` }, 'no-store');
       }
     }
   };
@@ -311,7 +401,67 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
   };
 }
 
-function send(res: ServerResponse, status: number, contentType: string, body: string, cacheControl: string): void {
+/** A response body, possibly compressed. `vary` marks bodies whose encoding depends on Accept-Encoding. */
+interface Body {
+  body: string | Buffer;
+  encoding?: Encoding;
+  vary?: boolean;
+}
+
+/** Compresses JSON and HTML worth compressing, when the request allows it. */
+function compressed(body: Buffer, encoding: Encoding | null): Body {
+  if (encoding === null || body.length < COMPRESS_MIN_BYTES) {
+    return { body, vary: true };
+  }
+  return { body: compress(body, encoding), encoding, vary: true };
+}
+
+interface PreparedAsset {
+  contentType: string;
+  /** The body in the best encoding the request accepts. */
+  encoded(encoding: Encoding | null): Body;
+}
+
+/** Decodes each asset's build-time encodings once, on first use. */
+function prepareAssets(assets: WebAssets): Record<string, PreparedAsset> {
+  const prepared: Record<string, PreparedAsset> = {};
+  for (const [path, asset] of Object.entries(assets)) {
+    const cache = new Map<string, Buffer>();
+    const decode = (encoding: Encoding): Buffer | undefined => {
+      const text = asset[encoding];
+      if (text === undefined) return undefined;
+      let buffer = cache.get(encoding);
+      if (buffer === undefined) {
+        buffer = Buffer.from(text, 'base64');
+        cache.set(encoding, buffer);
+      }
+      return buffer;
+    };
+    let plain: Buffer | undefined;
+    const identity = (): Buffer => (plain ??= Buffer.from(asset.body ?? gunzipSync(decode('gzip') ?? Buffer.alloc(0))));
+    prepared[path] = {
+      contentType: asset.contentType,
+      encoded: (encoding) => {
+        const vary = asset.gzip !== undefined || asset.br !== undefined;
+        // Brotli when allowed; a gzip-only client still gets gzip.
+        for (const candidate of encoding === 'br'
+          ? (['br', 'gzip'] as const)
+          : encoding === 'gzip'
+            ? ['gzip' as const]
+            : []) {
+          const buffer = decode(candidate);
+          if (buffer !== undefined) {
+            return { body: buffer, encoding: candidate, vary };
+          }
+        }
+        return { body: identity(), vary };
+      },
+    };
+  }
+  return prepared;
+}
+
+function send(res: ServerResponse, status: number, contentType: string, body: Body, cacheControl: string): void {
   if (res.headersSent) {
     res.end();
     return;
@@ -319,8 +469,14 @@ function send(res: ServerResponse, status: number, contentType: string, body: st
   res.statusCode = status;
   res.setHeader('Content-Type', contentType);
   res.setHeader('Cache-Control', cacheControl);
-  res.setHeader('Content-Length', Buffer.byteLength(body));
-  res.end(body);
+  if (body.vary === true) {
+    res.setHeader('Vary', 'Accept-Encoding');
+  }
+  if (body.encoding !== undefined) {
+    res.setHeader('Content-Encoding', body.encoding);
+  }
+  res.setHeader('Content-Length', Buffer.byteLength(body.body));
+  res.end(body.body);
 }
 
 function tokenMatches(header: string | string[] | undefined, token: string): boolean {
@@ -348,6 +504,37 @@ async function readBody(req: IncomingMessage): Promise<string> {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString('utf8');
+}
+
+/** A decimal integer parameter, or undefined when absent; anything else is a 400. */
+function intParam(params: URLSearchParams, name: string, message: string): number | undefined {
+  const raw = params.get(name);
+  if (raw === null) {
+    return undefined;
+  }
+  if (!/^\d{1,15}$/.test(raw)) {
+    throw new HttpError(400, message);
+  }
+  return Number(raw);
+}
+
+/** Validates API.view's parameters. */
+function parseViewQuery(params: URLSearchParams): ViewQuery {
+  const sort = params.get('sort') ?? '';
+  if (!isSortMode(sort)) {
+    throw new HttpError(400, 'sort must be one of recentDesc, idAsc, topPlayed, unratedFirst');
+  }
+  const limitMessage = `limit must be an integer from 1 to ${VIEW_LIMIT_MAX}`;
+  const limit = intParam(params, 'limit', limitMessage);
+  if (limit === undefined || limit < 1 || limit > VIEW_LIMIT_MAX) {
+    throw new HttpError(400, limitMessage);
+  }
+  const offset = intParam(params, 'offset', 'offset must be a non-negative integer') ?? 0;
+  const around = intParam(params, 'around', 'around must be a positive track ID');
+  if (around === 0) {
+    throw new HttpError(400, 'around must be a positive track ID');
+  }
+  return { sort, query: params.get('q') ?? '', offset, limit, ...(around !== undefined && { around }) };
 }
 
 function isPositiveInt(value: unknown): value is number {

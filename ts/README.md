@@ -52,13 +52,73 @@ adds:
 - **Open in Spotify** (or a), a `spotify:track:` link that macOS hands to
   the Spotify app.
 - **A light/dark/auto switch.** Auto follows the system setting; your
-  choice is remembered per browser.
+  choice is remembered per browser in the `tracker-theme` cookie, which
+  the server reads to render the page in that theme (no flash, no boot
+  script).
 
 The TUI and the web UI share their state machine (`src/app/model.ts`),
 their wording and layout decisions (`src/app/presenter.ts`), and the React
 hook that runs them (`src/app/useTracker.ts`). Only the drawing differs:
 Ink on a character grid in `src/tui`, React DOM with CSS in
 `src/web/client`.
+
+### How the work is split
+
+The web UI is a hybrid: the server owns the library and the browser owns
+the UI state.
+
+- **The server** (`src/web/server`) reads tracks and ratings once, at
+  startup and again on reload, after a sync, and when a rating is saved
+  (each bumps the library's `version`). It keeps the list in all four sort
+  orders and answers windowed queries with the TUI's own sort and search
+  code (`LocalTrackList` in `src/app/list.ts`), so both front ends always
+  agree. `GET /` is rendered on the server with `react-dom/server`: the
+  first screen (newest first, first track selected, the first 100 rows),
+  plus the data it was rendered from in
+  `<script type="application/json" id="tracker-initial">`. Reloading the
+  page shows the server's copy; r re-reads the database (say, after a
+  `tracker sync` in another terminal).
+- **The browser** hydrates that page (`hydrateRoot`) and runs the TUI's
+  model over a `RemoteTrackList` (`src/web/client/remoteList.ts`): a
+  sparse cache of rows for one sort, query, and library version. Moving
+  between loaded rows never touches the network. The list pane fetches
+  100-row chunks ahead of the selection and the scroll position (two
+  screens each way), so holding j/k or scrolling does not reach an
+  unloaded row in practice; one that has not arrived yet is drawn as a
+  placeholder of the same height. g/G jump by index and fetch the window
+  they land in.
+- **The model** works over a small list interface (count, row lookup,
+  index of a track; `TrackList` in `src/app/list.ts`). The TUI's in-memory
+  list re-sorts and filters synchronously, exactly as before. A remote list
+  turns re-sorting, searching, and reloading into `/api/view` requests
+  (`around` keeps the selected track selected, as the TUI does); answers to
+  superseded requests are dropped, and the counts and sort label describe
+  the rows on screen until the new ones arrive. A saved rating shows at
+  once; rows that later come back from a newer library version make the
+  page refetch around the selection, keeping the old rows on screen until
+  then.
+
+The API (types and details in `src/web/api.ts`; the Rust build serves the
+same one):
+
+- `GET /`: the server-rendered page.
+- `GET /api/view?sort=&q=&offset=&limit=[&around=]`: a window of the list,
+  `{version, total, matched, offset, rows, index}`. Each row is
+  `{track, rating, artists}`, plus `art` when the artwork cache already
+  knows the track. `limit` is 1 to 500.
+- `POST /api/reload`: re-reads the database, `{version, total}`.
+- `POST /api/sync`: syncs with Spotify, then reloads the library.
+- `POST /api/ratings`: saves a rating.
+- `GET /api/artwork?ids=`: album art for up to 50 tracks.
+- `GET /api/presence?token=`: the tab's presence stream.
+
+Responses are compressed when the browser allows: the script and
+stylesheet are compressed with brotli and gzip at build time
+(`scripts/build.mjs`) and embedded that way, and JSON and HTML over 1 KiB
+are compressed per response. The presence stream never is. The page
+renderer (`src/web/server/page.tsx` with React's server renderer) is
+embedded as a separate chunk that only `tracker web` evaluates, so it adds
+nothing to the startup of other commands.
 
 The server listens on 127.0.0.1 only and rejects other Host headers. Every
 write, and the presence stream, needs a per-launch token embedded in the
@@ -68,33 +128,36 @@ bundle and Spotify's scripts can run.
 
 ### Web UI performance compared with the other builds
 
+These numbers predate the hybrid design above (they describe the TS build
+downloading the whole library).
+
 Measured with `scripts/bench-web` (on `main`): headless Chromium driving all
 four `tracker web` builds round-robin, 5 runs, with every request outside
 127.0.0.1 blocked. The machine carried unrelated background load (load
 average about 7), so absolute times are inflated; the comparisons hold.
 Medians in ms unless noted.
 
-| 543 tracks (real data) | TS | Go | Rust | Swift |
-|---|--:|--:|--:|--:|
-| Server ready | 36 | 14 | 11 | 21 |
-| Cold load to interactive | 51 | 45 | 59 | 44 |
-| Warm reload to interactive | 30 | 25 | 31 | 28 |
-| Cold transfer | 444 KiB | 134 KiB | 1,192 KiB (945 wasm) | 135 KiB |
-| `j`: keydown to DOM / to next frame | 0.9 / 4.9 | 6.9 / 21.2 | 0.9 / 4.8 | 7.0 / 21.4 |
-| Sort (`o`) / search keystroke, to DOM | 1.9 / 1.0 | 6.2 / 6.7 | 1.8 / 0.9 | 6.0 / 6.6 |
-| Enter to "Saved" | 16.8 | 4.7 | 17.0 | 5.2 |
-| Bytes per `j` | 721 | 45,078 | 544 | 46,242 |
-| Server memory after interactions | 49 MiB | 41 MiB | 9 MiB | 27 MiB |
-| Tab closed to process exit | 3,018 | 3,013 | 3,013 | 3,022 |
+| 543 tracks (real data)                |        TS |         Go |                 Rust |      Swift |
+| ------------------------------------- | --------: | ---------: | -------------------: | ---------: |
+| Server ready                          |        36 |         14 |                   11 |         21 |
+| Cold load to interactive              |        51 |         45 |                   59 |         44 |
+| Warm reload to interactive            |        30 |         25 |                   31 |         28 |
+| Cold transfer                         |   444 KiB |    134 KiB | 1,192 KiB (945 wasm) |    135 KiB |
+| `j`: keydown to DOM / to next frame   | 0.9 / 4.9 | 6.9 / 21.2 |            0.9 / 4.8 | 7.0 / 21.4 |
+| Sort (`o`) / search keystroke, to DOM | 1.9 / 1.0 |  6.2 / 6.7 |            1.8 / 0.9 |  6.0 / 6.6 |
+| Enter to "Saved"                      |      16.8 |        4.7 |                 17.0 |        5.2 |
+| Bytes per `j`                         |       721 |     45,078 |                  544 |     46,242 |
+| Server memory after interactions      |    49 MiB |     41 MiB |                9 MiB |     27 MiB |
+| Tab closed to process exit            |     3,018 |      3,013 |                3,013 |      3,022 |
 
-| 25,000 tracks (synthetic) | TS | Go | Rust | Swift |
-|---|--:|--:|--:|--:|
-| Server ready | 53 | 101 | 22 | 150 |
-| Cold / warm load to interactive | 114 / 95 | 73 / 59 | 121 / 98 | 63 / 52 |
-| Cold transfer | 7,290 KiB | 131 KiB | 8,039 KiB | 133 KiB |
-| `j` / `G` / `o`, to DOM | 0.9 / 17.7 / 7.0 | 6.9 / 6.1 / 9.0 | 0.9 / 2.9 / 3.7 | 6.8 / 6.1 / 6.0 |
-| Server memory after interactions | 179 MiB | 441 MiB | 59 MiB | 208 MiB |
-| Server CPU for the interaction run | 90 | 540 | 20 | 720 |
+| 25,000 tracks (synthetic)          |               TS |              Go |            Rust |           Swift |
+| ---------------------------------- | ---------------: | --------------: | --------------: | --------------: |
+| Server ready                       |               53 |             101 |              22 |             150 |
+| Cold / warm load to interactive    |         114 / 95 |         73 / 59 |        121 / 98 |         63 / 52 |
+| Cold transfer                      |        7,290 KiB |         131 KiB |       8,039 KiB |         133 KiB |
+| `j` / `G` / `o`, to DOM            | 0.9 / 17.7 / 7.0 | 6.9 / 6.1 / 9.0 | 0.9 / 2.9 / 3.7 | 6.8 / 6.1 / 6.0 |
+| Server memory after interactions   |          179 MiB |         441 MiB |          59 MiB |         208 MiB |
+| Server CPU for the interaction run |               90 |             540 |              20 |             720 |
 
 The two designs trade in opposite directions:
 

@@ -11,6 +11,7 @@ import { formatArtists } from '../core/artists';
 import { Db } from '../core/db';
 import type { Rating, SyncStats, Track } from '../core/model';
 import { inkOptions } from './app';
+import { LocalTrackList, type TrackText } from '../app/list';
 import {
   buildTrackText,
   makeModel,
@@ -53,7 +54,31 @@ function loaded(tracks: Track[], ratings: Map<number, Rating> = new Map()): Msg 
   return { type: 'tracksLoaded', tracks, ratings, trackText: new Map() };
 }
 
-const ids = (tracks: readonly Track[]) => tracks.map((t) => t.id);
+/** The IDs of the tracks on screen, in order. */
+const ids = (m: Model) => Array.from({ length: m.list.count }, (_, i) => m.list.row(i)?.track.id);
+
+/**
+ * makeModel with an in-memory list described the way the Go tests do: the
+ * tracks shown, the whole library (default: the tracks shown), and ratings.
+ */
+function model(
+  fields: Partial<Model> & {
+    tracks?: Track[];
+    allTracks?: Track[];
+    ratings?: Map<number, Rating>;
+    trackText?: Map<number, TrackText>;
+  } = {},
+): Model {
+  const { tracks = [], allTracks, ratings, trackText, ...rest } = fields;
+  const list = LocalTrackList.of(tracks, {
+    all: allTracks ?? tracks,
+    ...(ratings !== undefined && { ratings }),
+    ...(trackText !== undefined && { text: trackText }),
+    ...(rest.sortMode !== undefined && { sort: rest.sortMode }),
+    ...(rest.searchQuery !== undefined && { query: rest.searchQuery }),
+  });
+  return makeModel({ ...rest, list });
+}
 
 function footerHasNotificationLine(rendered: string, want: string): boolean {
   const lines = rendered.split('\n');
@@ -84,13 +109,13 @@ describe('update', () => {
       ),
     );
     expect(got.loadingTracks).toBe(false);
-    expect(ids(got.tracks)).toEqual([1, 3, 2]);
+    expect(ids(got)).toEqual([1, 3, 2]);
     expect(selectedRating(got)?.stars).toBe(4);
     expect(cmd).toBeNull();
   });
 
   it('preserves the selected track across a reload', () => {
-    const m = makeModel({ tracks: [track({ id: 7 }), track({ id: 9 })], selectedIndex: 1 });
+    const m = model({ tracks: [track({ id: 7 }), track({ id: 9 })], selectedIndex: 1 });
     const [got, cmd] = update(
       m,
       loaded([
@@ -104,7 +129,7 @@ describe('update', () => {
   });
 
   it('reads the rating from the cache when moving the selection', () => {
-    const m = makeModel({
+    const m = model({
       width: 120,
       height: 28,
       tracks: [
@@ -122,7 +147,7 @@ describe('update', () => {
   });
 
   it('starts an asynchronous sync on s', async () => {
-    const m = { ...newModel({ sync: () => Promise.resolve(stats) }), tracks: [track({ id: 1 })] };
+    const m = { ...newModel({ sync: () => Promise.resolve(stats) }), list: LocalTrackList.of([track({ id: 1 })]) };
     const [got, cmd] = update(m, textKey('s'));
     expect(got.syncing).toBe(true);
     expect(cmd).not.toBeNull();
@@ -136,7 +161,7 @@ describe('update', () => {
   });
 
   it('reloads tracks after a sync finishes', () => {
-    const m = makeModel({
+    const m = model({
       deps: { load: () => Promise.resolve({ tracks: [], ratings: [] }) },
       tracks: [track({ id: 1 })],
       syncing: true,
@@ -149,7 +174,7 @@ describe('update', () => {
   });
 
   it('reports a failed sync in the status line', () => {
-    const m = makeModel({ tracks: [track({ id: 1 })], syncing: true });
+    const m = model({ tracks: [track({ id: 1 })], syncing: true });
     const [got] = update(m, { type: 'syncFinished', stats, err: new Error('bad token') });
     expect(got.syncing).toBe(false);
     expect(got.statusIsError).toBe(true);
@@ -157,7 +182,7 @@ describe('update', () => {
   });
 
   it('cycles the sort order with o and keeps the selected track', () => {
-    const m = makeModel({
+    const m = model({
       tracks: [
         track({ id: 10, lastPlayedAt: 300, playCount: 2 }),
         track({ id: 7, lastPlayedAt: 200, playCount: 8 }),
@@ -169,11 +194,11 @@ describe('update', () => {
     const [got] = update(m, textKey('o'));
     expect(got.sortMode).toBe('idAsc');
     expect(selectedTrack(got)?.id).toBe(7);
-    expect(ids(got.tracks)).toEqual([4, 7, 10]);
+    expect(ids(got)).toEqual([4, 7, 10]);
   });
 
   it('moves to the top and bottom with g and G', () => {
-    const m = makeModel({ tracks: [track({ id: 11 }), track({ id: 22 }), track({ id: 33 })], selectedIndex: 1 });
+    const m = model({ tracks: [track({ id: 11 }), track({ id: 22 }), track({ id: 33 })], selectedIndex: 1 });
     let [got, cmd] = update(m, textKey('g'));
     expect(got.selectedIndex).toBe(0);
     expect(selectedTrack(got)?.id).toBe(11);
@@ -200,14 +225,14 @@ const searchTracks = [
 
 describe('search', () => {
   it('filters tracks, and enter leaves search mode', () => {
-    const m = makeModel({ allTracks: searchTracks, tracks: searchTracks });
+    const m = model({ allTracks: searchTracks, tracks: searchTracks });
     let [got] = update(m, textKey('/'));
     expect(got.searching).toBe(true);
 
     let cmd;
     [got, cmd] = update(got, textKey('yuja'));
     expect(got.searchQuery).toBe('yuja');
-    expect(ids(got.tracks)).toEqual([1]);
+    expect(ids(got)).toEqual([1]);
     expect(selectedTrack(got)?.id).toBe(1);
     expect(cmd).toBeNull();
 
@@ -217,7 +242,7 @@ describe('search', () => {
   });
 
   it('esc clears the filter and restores the tracks', () => {
-    const m = makeModel({
+    const m = model({
       searching: true,
       searchQuery: 'yuja',
       allTracks: searchTracks.slice(1),
@@ -226,12 +251,12 @@ describe('search', () => {
     const [got, cmd] = update(m, specialKey('esc'));
     expect(got.searching).toBe(false);
     expect(got.searchQuery).toBe('');
-    expect(got.tracks).toHaveLength(2);
+    expect(got.list.count).toBe(2);
     expect(cmd).toBeNull();
   });
 
   it('shows a no-match message', () => {
-    const m = makeModel({ width: 100, height: 28, searchQuery: 'zzz', allTracks: searchTracks.slice(2) });
+    const m = model({ width: 100, height: 28, searchQuery: 'zzz', allTracks: searchTracks.slice(2) });
     const frame = renderText(m);
     expect(frame).toContain('No tracks match /zzz');
     expect(footerHasNotificationLine(frame, 'Filter /zzz (0/1)')).toBe(true);
@@ -248,23 +273,23 @@ describe('search', () => {
         lastPlayedAt: 200,
       }),
     ];
-    const m = makeModel({ allTracks, trackText: buildTrackText(allTracks) });
+    const m = model({ allTracks, trackText: buildTrackText(allTracks) });
     for (const query of ['ólafsson', 'NOCTURNES', 'ligeti']) {
       m.searchQuery = query;
       refreshTrackList(m, 0);
-      expect(m.tracks, query).toHaveLength(1);
+      expect(m.list.count, query).toBe(1);
     }
 
     m.searchQuery = 'wang ligeti';
     refreshTrackList(m, 0);
-    expect(m.tracks).toHaveLength(0);
+    expect(m.list.count).toBe(0);
   });
 
   it('appends pasted text to the search and the opinion', () => {
-    const m = makeModel({ searching: true, allTracks: searchTracks.slice(1).reverse() });
+    const m = model({ searching: true, allTracks: searchTracks.slice(1).reverse() });
     let [got] = update(m, { type: 'paste', text: 'yuja' });
     expect(got.searchQuery).toBe('yuja');
-    expect(ids(got.tracks)).toEqual([1]);
+    expect(ids(got)).toEqual([1]);
 
     [got] = update({ ...got, searching: false, editingRating: true }, { type: 'paste', text: 'Op. 111' });
     expect(got.draftOpinion).toBe('Op. 111');
@@ -275,7 +300,7 @@ describe('search', () => {
 
 describe('ratings', () => {
   it('re-sorts unrated-first after a save without touching the previous model', () => {
-    const m = makeModel({
+    const m = model({
       tracks: [track({ id: 4, lastPlayedAt: 300 }), track({ id: 9, lastPlayedAt: 200 })],
       ratings: ratingsMap(rating({ trackId: 9, stars: 2 })),
       sortMode: 'unratedFirst',
@@ -286,14 +311,14 @@ describe('ratings', () => {
       trackId: 4,
       rating: rating({ trackId: 4, stars: 5, updatedAt: 10 }),
     });
-    expect(got.ratings.has(4)).toBe(true);
+    expect(selectedRating(got)?.stars).toBe(5);
     expect(selectedTrack(got)?.id).toBe(4);
-    expect(ids(got.tracks)).toEqual([4, 9]);
-    expect(m.ratings.has(4)).toBe(false);
+    expect(ids(got)).toEqual([4, 9]);
+    expect((m.list as LocalTrackList).rating(4)).toBeNull();
   });
 
   it('enter opens the editor with the existing rating', () => {
-    const m = makeModel({
+    const m = model({
       tracks: [track({ id: 1, trackName: 'One', artists: '["A"]' })],
       ratings: ratingsMap(rating({ trackId: 1, stars: 4, opinion: 'Warm' })),
     });
@@ -306,7 +331,7 @@ describe('ratings', () => {
   it('handles editor input and saves asynchronously', async () => {
     const m = {
       ...newModel({ saveRating: (arg) => Promise.resolve({ ...arg }) }),
-      tracks: [track({ id: 7, trackName: 'One', artists: '["A"]' })],
+      list: LocalTrackList.of([track({ id: 7, trackName: 'One', artists: '["A"]' })]),
     };
     let [got] = update(m, specialKey('enter'));
     expect(got.editingRating).toBe(true);
@@ -323,7 +348,7 @@ describe('ratings', () => {
   });
 
   it('a saved rating updates the selection', () => {
-    const m = makeModel({ tracks: [track({ id: 9 })], savingRating: true });
+    const m = model({ tracks: [track({ id: 9 })], savingRating: true });
     const [got] = update(m, {
       type: 'ratingSaved',
       trackId: 9,
@@ -368,25 +393,25 @@ describe('formatArtists', () => {
 
 describe('view', () => {
   it('renders the error state', () => {
-    expect(renderText(makeModel({ err: new Error('boom') }))).toContain('Error: boom');
+    expect(renderText(model({ err: new Error('boom') }))).toContain('Error: boom');
   });
 
   it('uses the vertical layout for narrow windows', () => {
-    const geometry = layout(makeModel({ width: 70, height: 24 }));
+    const geometry = layout(model({ width: 70, height: 24 }));
     expect(geometry.vertical).toBe(true);
     expect(geometry.listWidth).toBe(geometry.detailWidth);
   });
 
   it('uses the horizontal layout for wide windows', () => {
-    const geometry = layout(makeModel({ width: 140, height: 30 }));
+    const geometry = layout(model({ width: 140, height: 30 }));
     expect(geometry.vertical).toBe(false);
     expect(geometry.listHeight).toBe(geometry.detailHeight);
   });
 
   it('centers the selection when scrolling', () => {
-    const m = makeModel({ tracks: Array.from({ length: 12 }, () => track({ id: 0 })), selectedIndex: 6 });
+    const m = model({ tracks: Array.from({ length: 12 }, () => track({ id: 0 })), selectedIndex: 6 });
     const visible = visibleTracks(m, 11);
-    expect(visible.tracks.length).toBeGreaterThan(0);
+    expect(visible.rows.length).toBeGreaterThan(0);
     expect(visible.offset).not.toBe(0);
     expect(visible.hiddenAbove).toBe(true);
     expect(visible.hiddenBelow).toBe(true);
@@ -396,13 +421,13 @@ describe('view', () => {
     const tracks = ['One', 'Two', 'Three', 'Four', 'Five', 'Six'].map((trackName, i) =>
       track({ id: i + 1, trackName, artists: `["${String.fromCharCode(65 + i)}"]`, lastPlayedAt: 100 }),
     );
-    const frame = renderText(makeModel({ width: 80, height: 16, allTracks: tracks, tracks }));
+    const frame = renderText(model({ width: 80, height: 16, allTracks: tracks, tracks }));
     expect(frame).toContain('Local track history');
     expect(frame).toContain('sort: recent');
   });
 
   it('shows the rating editor', () => {
-    const m = makeModel({
+    const m = model({
       width: 120,
       height: 28,
       tracks: [track({ id: 1, trackName: 'One', artists: '["A"]' })],
@@ -417,7 +442,7 @@ describe('view', () => {
 
   it('shows which editor field has focus', () => {
     let m = startRatingEditor(
-      makeModel({ width: 120, height: 28, tracks: [track({ id: 1, trackName: 'One', artists: '["A"]' })] }),
+      model({ width: 120, height: 28, tracks: [track({ id: 1, trackName: 'One', artists: '["A"]' })] }),
     );
     m = { ...m, draftOpinion: 'Op. 10' };
     let frame = renderText(m);
@@ -432,7 +457,7 @@ describe('view', () => {
   });
 
   it('fits a small window with a status footer', () => {
-    const m = makeModel({
+    const m = model({
       width: 92,
       height: 30,
       tracks: [
@@ -461,7 +486,7 @@ describe('rating editor focus', () => {
   /** A model with the editor open on a fresh track. */
   function openRatingEditor(): Model {
     const [got] = update(
-      makeModel({ tracks: [track({ id: 1, trackName: 'One', artists: '["A"]' })] }),
+      model({ tracks: [track({ id: 1, trackName: 'One', artists: '["A"]' })] }),
       specialKey('enter'),
     );
     expect(got.editingRating).toBe(true);
@@ -526,7 +551,7 @@ describe('loading', () => {
       });
       db.upsertRating({ trackId: saved.id, stars: 4, opinion: 'Warm', updatedAt: 10 });
 
-      const m = makeModel({
+      const m = model({
         deps: { load: () => Promise.resolve({ tracks: db.listAllTracks(), ratings: db.listAllRatings() }) },
       });
       const [, cmd] = update(m, textKey('r'));
@@ -601,11 +626,11 @@ describe('frames fit the window', () => {
   }
 
   it('visible tracks leave room for scroll hints', () => {
-    const m = makeModel({ tracks: Array.from({ length: 30 }, () => track({ id: 0 })) });
+    const m = model({ tracks: Array.from({ length: 30 }, () => track({ id: 0 })) });
     for (let height = 5; height <= 40; height++) {
-      for (let selectedIndex = 0; selectedIndex < m.tracks.length; selectedIndex++) {
+      for (let selectedIndex = 0; selectedIndex < m.list.count; selectedIndex++) {
         const visible = visibleTracks({ ...m, selectedIndex }, height);
-        const lines = 3 + 2 * visible.tracks.length + Number(visible.hiddenAbove) + Number(visible.hiddenBelow);
+        const lines = 3 + 2 * visible.rows.length + Number(visible.hiddenAbove) + Number(visible.hiddenBelow);
         expect(lines, `height=${height} selected=${selectedIndex}`).toBeLessThanOrEqual(Math.max(height, 3 + 2 + 2));
       }
     }
@@ -621,7 +646,7 @@ describe('frames fit the window', () => {
   });
 
   it('wraps the footer hints to the width, keeping each hint whole', () => {
-    const footer = footerView(makeModel({ width: 50 }));
+    const footer = footerView(model({ width: 50 }));
     for (const line of footer.split('\n')) {
       expect(stringWidth(line), line).toBeLessThanOrEqual(48);
     }

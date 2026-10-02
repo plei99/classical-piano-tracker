@@ -38,7 +38,8 @@ describe('pointer messages', () => {
 
   it('setSearch filters and keeps the selection when it still matches', () => {
     const model = run(loaded(), { type: 'select', trackId: 2 }, { type: 'setSearch', query: 'track 2' });
-    expect(model.tracks.map((t) => t.id)).toEqual([2]);
+    expect(model.list.count).toBe(1);
+    expect(model.list.row(0)?.track.id).toBe(2);
     expect(model.selectedIndex).toBe(0);
     expect(trackListSummary(model)).toBe('1/3 shown · sort: recent');
   });

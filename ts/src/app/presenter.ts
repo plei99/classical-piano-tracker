@@ -4,9 +4,13 @@
  * cell against the Go build); the web UI lays the same content out with CSS.
  * Keeping every user-visible decision here means both front ends always say
  * the same thing.
+ *
+ * Counts, the sort label, and the filter describe the list on screen
+ * (`m.list`), which for a remote list lags the keys by a round trip; the
+ * TUI's list always matches the model's sort and query.
  */
 import type { Rating, Track } from '../core/model';
-import { selectedRating, selectedTrack, sortModeLabel, textFor, totalTrackCount, type Model } from './model';
+import { selectedRow, sortModeLabel, type Model } from './model';
 
 export const TITLE = 'Classical Piano Tracker';
 export const SUBTITLE = 'Local track history';
@@ -73,8 +77,8 @@ export type Screen = 'loading' | 'error' | 'empty' | 'noMatch' | 'browse';
 export function screen(m: Model): Screen {
   if (m.loadingTracks) return 'loading';
   if (m.err !== null) return 'error';
-  if (m.allTracks.length === 0 && m.tracks.length === 0) return 'empty';
-  if (m.tracks.length === 0) return 'noMatch';
+  if (m.list.total === 0 && m.list.count === 0) return 'empty';
+  if (m.list.count === 0) return 'noMatch';
   return 'browse';
 }
 
@@ -83,7 +87,7 @@ export function errorText(m: Model): string {
 }
 
 export function noMatchText(m: Model): string {
-  return `No tracks match /${m.searchQuery.trim()}`;
+  return `No tracks match /${m.list.query.trim()}`;
 }
 
 /** The status line above the key help, or null when there is nothing to report. */
@@ -102,25 +106,24 @@ export function status(m: Model): Status | null {
   if (m.statusMessage !== '') {
     return { text: m.statusIsError ? `Error: ${m.statusMessage}` : m.statusMessage, isError: m.statusIsError };
   }
+  const { query, count, total } = m.list;
   if (m.searching) {
-    return { text: `Search /${m.searchQuery}_ (${m.tracks.length}/${totalTrackCount(m)})`, isError: false };
+    return { text: `Search /${query}_ (${count}/${total})`, isError: false };
   }
-  if (m.searchQuery.trim() !== '') {
-    return {
-      text: `Filter /${m.searchQuery.trim()} (${m.tracks.length}/${totalTrackCount(m)})`,
-      isError: false,
-    };
+  if (query.trim() !== '') {
+    return { text: `Filter /${query.trim()} (${count}/${total})`, isError: false };
   }
   return null;
 }
 
 /** e.g. "543 loaded · sort: recent", or "12/543 shown · sort: recent" while filtered. */
 export function trackListSummary(m: Model): string {
-  const label = sortModeLabel(m.sortMode);
-  if (m.searchQuery.trim() === '') {
-    return `${m.tracks.length} loaded · sort: ${label}`;
+  const { sort, query, count, total } = m.list;
+  const label = sortModeLabel(sort);
+  if (query.trim() === '') {
+    return `${count} loaded · sort: ${label}`;
   }
-  return `${m.tracks.length}/${totalTrackCount(m)} shown · sort: ${label}`;
+  return `${count}/${total} shown · sort: ${label}`;
 }
 
 export function ratingDraftStarsLabel(m: Model): string {
@@ -143,13 +146,14 @@ export interface Details {
 }
 
 export function details(m: Model): Details | null {
-  const track = selectedTrack(m);
-  if (track === null) {
+  const row = selectedRow(m);
+  if (row === null) {
     return null;
   }
+  const { track } = row;
   return {
     track,
-    artists: textFor(m, track).artists,
+    artists: row.artists,
     fields: [
       { label: 'ID', value: String(track.id) },
       { label: 'Spotify ID', value: track.spotifyId },
@@ -157,7 +161,7 @@ export function details(m: Model): Details | null {
       { label: 'Play Count', value: String(track.playCount) },
       { label: 'Last Played', value: formatTime(track.lastPlayedAt, m.timeZone) },
     ],
-    rating: m.savingRating ? 'saving' : selectedRating(m),
+    rating: m.savingRating ? 'saving' : row.rating,
   };
 }
 

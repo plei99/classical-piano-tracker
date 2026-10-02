@@ -1,14 +1,15 @@
-import { request } from 'node:http';
+import { type ClientRequest, request } from 'node:http';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { Db } from '../../core/db';
 import { emptySyncStats, type SyncStats } from '../../core/model';
-import { API, type ArtworkResponse, TOKEN_HEADER } from '../api';
+import { API, type ArtworkResponse, PRESENCE_TOKEN_PARAM, TOKEN_HEADER } from '../api';
 import type { ArtworkLookup } from './artwork';
 import {
   CONTENT_SECURITY_POLICY,
   MAX_BODY_BYTES,
+  PRESENCE_GRACE_MS,
   startWebServer,
   type WebAssets,
   type WebServer,
@@ -336,5 +337,179 @@ describe('web server', () => {
       (e: unknown) => e as NodeJS.ErrnoException,
     );
     expect(err.code).toBe('EADDRINUSE');
+  });
+});
+
+/** An open presence stream, as a page holds one. */
+interface Tab {
+  status: number;
+  headers: Record<string, string | string[] | undefined>;
+  /** What the server has sent so far. */
+  received: () => string;
+  close(): void;
+}
+
+/** Opens a presence stream and resolves once the server answers (with the stream's first bytes, if it is one). */
+function openTab(h: Harness, query = `?${PRESENCE_TOKEN_PARAM}=${h.server.token}`, host?: string): Promise<Tab> {
+  return new Promise((resolve, reject) => {
+    let req: ClientRequest | undefined = undefined;
+    req = request(
+      {
+        host: '127.0.0.1',
+        port: h.server.port,
+        path: `${API.presence}${query}`,
+        headers: { Host: host ?? `127.0.0.1:${h.server.port}` },
+      },
+      (res) => {
+        let text = '';
+        const tab: Tab = {
+          status: res.statusCode ?? 0,
+          headers: res.headers,
+          received: () => text,
+          close: () => req?.destroy(),
+        };
+        res.on('data', (chunk: Buffer) => {
+          const first = text === '';
+          text += chunk.toString('utf8');
+          if (first) resolve(tab);
+        });
+        res.on('end', () => resolve(tab));
+        res.on('error', () => {});
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Resolves to whether `allTabsClosed` settled within `ms`. */
+async function closedWithin(h: Harness, ms: number): Promise<boolean> {
+  return Promise.race([h.server.allTabsClosed.then(() => true), sleep(ms).then(() => false)]);
+}
+
+describe('presence', () => {
+  const GRACE = 60;
+
+  it('waits 3 s by default', () => {
+    expect(PRESENCE_GRACE_MS).toBe(3000);
+  });
+
+  it('streams comments to a page with the token', async () => {
+    const h = await harness();
+    const tab = await openTab(h);
+    expect(tab.status).toBe(200);
+    expect(tab.headers['content-type']).toBe('text/event-stream');
+    expect(tab.headers['cache-control']).toBe('no-store');
+    expect(tab.headers['content-security-policy']).toBe(CONTENT_SECURITY_POLICY);
+    expect(tab.received()).toBe(': ok\n\n');
+    tab.close();
+  });
+
+  it('rejects a missing or wrong token and a foreign Host, without counting them', async () => {
+    const h = await harness({ presenceGraceMs: GRACE });
+    for (const query of ['', `?${PRESENCE_TOKEN_PARAM}=`, `?${PRESENCE_TOKEN_PARAM}=${'f'.repeat(32)}`]) {
+      const tab = await openTab(h, query);
+      expect([tab.status, JSON.parse(tab.received())]).toEqual([403, { error: 'missing or invalid token' }]);
+    }
+    // The token in the header (as POSTs send it) does not count either.
+    const header = await h.call('GET', API.presence, { headers: { [TOKEN_HEADER]: h.server.token } });
+    expect(header.status).toBe(403);
+    const foreign = await openTab(h, undefined, 'evil.example');
+    expect([foreign.status, JSON.parse(foreign.received())]).toEqual([403, { error: 'forbidden host' }]);
+    const posted = await post(h, `${API.presence}?${PRESENCE_TOKEN_PARAM}=${h.server.token}`, {});
+    expect([posted.status, posted.headers['allow']]).toEqual([405, 'GET']);
+    expect(await closedWithin(h, GRACE * 3)).toBe(false);
+  });
+
+  it('never stops before a page has connected', async () => {
+    const h = await harness({ presenceGraceMs: GRACE });
+    expect((await h.call('GET', '/')).status).toBe(200);
+    expect(await closedWithin(h, GRACE * 3)).toBe(false);
+  });
+
+  it('stops once the last stream has been closed for the grace period', async () => {
+    const h = await harness({ presenceGraceMs: GRACE });
+    const tab = await openTab(h);
+    expect(await closedWithin(h, GRACE * 2)).toBe(false);
+    const closedAt = Date.now();
+    tab.close();
+    await h.server.allTabsClosed;
+    expect(Date.now() - closedAt).toBeGreaterThanOrEqual(GRACE - 5);
+  });
+
+  it('keeps running through a reload', async () => {
+    const h = await harness({ presenceGraceMs: GRACE });
+    const before = await openTab(h);
+    before.close();
+    await sleep(GRACE / 3);
+    const after = await openTab(h);
+    expect(await closedWithin(h, GRACE * 3)).toBe(false);
+    after.close();
+    expect(await closedWithin(h, GRACE * 3)).toBe(true);
+  });
+
+  it('stops only after the last of several tabs closes', async () => {
+    const h = await harness({ presenceGraceMs: GRACE });
+    const [first, second] = await Promise.all([openTab(h), openTab(h)]);
+    first.close();
+    expect(await closedWithin(h, GRACE * 3)).toBe(false);
+    second!.close();
+    expect(await closedWithin(h, GRACE * 3)).toBe(true);
+  });
+
+  it('waits for a running sync before stopping', async () => {
+    let release!: (stats: SyncStats) => void;
+    const h = await harness({
+      presenceGraceMs: GRACE,
+      sync: () => new Promise((resolve) => (release = resolve)),
+    });
+    const tab = await openTab(h);
+    const syncing = post(h, API.sync, {});
+    await sleep(20);
+    tab.close();
+    expect(await closedWithin(h, GRACE * 3)).toBe(false);
+    release(emptySyncStats());
+    expect((await syncing).status).toBe(200);
+    expect(await closedWithin(h, GRACE)).toBe(true);
+  });
+
+  it('waits for a rating save, and keeps running if a tab returns meanwhile', async () => {
+    const h = await harness({ presenceGraceMs: GRACE });
+    const trackId = seedTrack(h.db);
+    const tab = await openTab(h);
+    // A save whose body is still arriving when the grace period ends.
+    let req: ClientRequest | undefined = undefined;
+    const saved = new Promise<number>((resolve, reject) => {
+      req = request(
+        {
+          host: '127.0.0.1',
+          port: h.server.port,
+          method: 'POST',
+          path: API.ratings,
+          headers: {
+            Host: `127.0.0.1:${h.server.port}`,
+            [TOKEN_HEADER]: h.server.token,
+            'Transfer-Encoding': 'chunked',
+          },
+        },
+        (res) => {
+          res.resume();
+          res.on('end', () => resolve(res.statusCode ?? 0));
+        },
+      );
+      req.on('error', reject);
+      req.write(`{"trackId":${trackId},"stars":4,`);
+    });
+    await sleep(20);
+    tab.close();
+    expect(await closedWithin(h, GRACE * 3)).toBe(false);
+    const back = await openTab(h);
+    req!.end('"opinion":"","updatedAt":1}');
+    expect(await saved).toBe(200);
+    expect(await closedWithin(h, GRACE * 3)).toBe(false);
+    back.close();
+    expect(await closedWithin(h, GRACE * 3)).toBe(true);
   });
 });

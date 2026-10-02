@@ -25,8 +25,17 @@ keeps the bundle readable for CPU profiles.
 ```bash
 tracker web                  # serves http://127.0.0.1:8765/ and opens your browser
 tracker web --port 9000 --no-open
+tracker web --keep-running   # keep serving after the last tab closes
 tracker-sandbox ts web       # the same, on a copy of your data
 ```
+
+It stops by itself 3 seconds after its last browser tab closes (a reload
+does not count), once any sync or rating save has finished, and prints
+`All tabs closed; stopped the tracker web UI.` Until a tab has connected it
+waits indefinitely, so `--no-open` still works. Each page holds
+`GET /api/presence?token=<page token>`, an event stream of comments, open
+for as long as it is open; if that stream stays down, the footer reports
+that `tracker web` has stopped.
 
 The web UI looks like the TUI and uses the same keys: j/k, g/G, `/` to
 search, o to sort, s to sync, e or Enter to rate, and r to reload. It
@@ -52,7 +61,8 @@ Ink on a character grid in `src/tui`, React DOM with CSS in
 `src/web/client`.
 
 The server listens on 127.0.0.1 only and rejects other Host headers. Every
-write needs a per-launch token embedded in the page. Spotify's player
+write, and the presence stream, needs a per-launch token embedded in the
+page, so another site cannot keep the server running. Spotify's player
 requires `'unsafe-eval'` in the page's script policy; only this app's
 bundle and Spotify's scripts can run.
 

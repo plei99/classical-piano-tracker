@@ -16,6 +16,7 @@ import {
   ARTWORK_BATCH,
   type ErrorResponse,
   type LibraryResponse,
+  PRESENCE_TOKEN_PARAM,
   type SaveRatingRequest,
   TOKEN_HEADER,
 } from '../api';
@@ -41,6 +42,12 @@ export const MAX_BODY_BYTES = 64 * 1024;
 /** Assets are rebuilt with the binary, so a short cache only saves reloads within one session. */
 const ASSET_CACHE_CONTROL = 'private, max-age=300';
 
+/** How long no page may hold a presence stream before the server stops: enough for a reload to reconnect. */
+export const PRESENCE_GRACE_MS = 3000;
+
+/** Keeps presence streams from looking idle to anything between the page and the server. */
+const PRESENCE_PING_MS = 15_000;
+
 export interface WebServerOptions {
   db: Db;
   assets: WebAssets;
@@ -51,6 +58,8 @@ export interface WebServerOptions {
   port?: number;
   /** Fixed token for tests; normally random per launch. */
   token?: string;
+  /** Shorter in tests; PRESENCE_GRACE_MS otherwise. */
+  presenceGraceMs?: number;
 }
 
 export interface WebServer {
@@ -58,6 +67,11 @@ export interface WebServer {
   url: string;
   port: number;
   token: string;
+  /**
+   * Resolves once a page has connected and then no page has held a presence
+   * stream for the grace period, with no sync or rating save running.
+   */
+  allTabsClosed: Promise<void>;
   close(): Promise<void>;
 }
 
@@ -73,22 +87,83 @@ class HttpError extends Error {
 }
 
 /**
+ * Counts the pages holding a presence stream open and decides when the last
+ * one has gone for good: none for the grace period, so a reload does not
+ * count, and then no work running, so a sync or save is never cut short.
+ */
+class TabPresence {
+  private tabs = 0;
+  private busy = 0;
+  private graceOver = false;
+  private disposed = false;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private resolve!: () => void;
+  readonly allClosed = new Promise<void>((resolve) => (this.resolve = resolve));
+
+  constructor(private readonly graceMs: number) {}
+
+  opened(): void {
+    this.tabs++;
+    this.graceOver = false;
+    clearTimeout(this.timer);
+  }
+
+  closed(): void {
+    this.tabs--;
+    if (this.tabs === 0 && !this.disposed) {
+      this.timer = setTimeout(() => {
+        this.graceOver = true;
+        this.check();
+      }, this.graceMs);
+    }
+  }
+
+  /** Runs work the server must not stop in the middle of. */
+  async work<T>(run: () => Promise<T>): Promise<T> {
+    this.busy++;
+    try {
+      return await run();
+    } finally {
+      this.busy--;
+      this.check();
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    clearTimeout(this.timer);
+  }
+
+  private check(): void {
+    if (this.graceOver && this.tabs === 0 && this.busy === 0) {
+      this.resolve();
+    }
+  }
+}
+
+type Route =
+  | { method: 'GET' | 'POST'; handle: (req: IncomingMessage, url: URL) => unknown }
+  /** Answers with its own stream instead of a JSON body. */
+  | { method: 'GET'; stream: (url: URL, res: ServerResponse) => void };
+
+/**
  * Binds 127.0.0.1 and serves until `close()`. Rejects with the listen error
  * (e.g. code EADDRINUSE) when the port cannot be bound.
  */
 export async function startWebServer(options: WebServerOptions): Promise<WebServer> {
   const token = options.token ?? randomBytes(16).toString('hex');
   let port = 0;
+  const presence = new TabPresence(options.presenceGraceMs ?? PRESENCE_GRACE_MS);
   /** One sync at a time: overlapping runs would both count plays before either saves the checkpoint. */
   let syncing: Promise<SyncStats> | null = null;
   const sync = (): Promise<SyncStats> => {
-    syncing ??= options.sync().finally(() => {
+    syncing ??= presence.work(options.sync).finally(() => {
       syncing = null;
     });
     return syncing;
   };
 
-  const routes: Record<string, { method: 'GET' | 'POST'; handle: (req: IncomingMessage, url: URL) => unknown }> = {
+  const routes: Record<string, Route> = {
     [API.library]: {
       method: 'GET',
       handle: (): LibraryResponse => ({ tracks: options.db.listAllTracks(), ratings: options.db.listAllRatings() }),
@@ -102,13 +177,14 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     },
     [API.ratings]: {
       method: 'POST',
-      handle: async (req): Promise<Rating> => {
-        const params = parseRating(await readBody(req));
-        if (options.db.trackById(params.trackId) === null) {
-          throw new HttpError(404, `track ${params.trackId} not found`);
-        }
-        return options.db.upsertRating(params);
-      },
+      handle: (req): Promise<Rating> =>
+        presence.work(async () => {
+          const params = parseRating(await readBody(req));
+          if (options.db.trackById(params.trackId) === null) {
+            throw new HttpError(404, `track ${params.trackId} not found`);
+          }
+          return options.db.upsertRating(params);
+        }),
     },
     [API.artwork]: {
       method: 'GET',
@@ -119,6 +195,22 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
           throw new HttpError(400, `at most ${ARTWORK_BATCH} ids per request, got ${ids.length}`);
         }
         return options.artwork.lookup(ids.map((id) => id.trim()));
+      },
+    },
+    [API.presence]: {
+      method: 'GET',
+      stream: (url, res) => {
+        if (!tokenMatches(url.searchParams.get(PRESENCE_TOKEN_PARAM) ?? undefined, token)) {
+          throw new HttpError(403, 'missing or invalid token');
+        }
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+        res.write(': ok\n\n');
+        const ping = setInterval(() => res.write(': ping\n\n'), PRESENCE_PING_MS);
+        presence.opened();
+        res.on('close', () => {
+          clearInterval(ping);
+          presence.closed();
+        });
       },
     },
   };
@@ -152,6 +244,10 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
         }
         if (route.method !== method) {
           throw new HttpError(405, 'method not allowed', { Allow: route.method });
+        }
+        if ('stream' in route) {
+          route.stream(url, res);
+          return;
         }
         const body = await route.handle(req, url);
         send(res, 200, 'application/json; charset=utf-8', JSON.stringify(body), 'no-store');
@@ -204,9 +300,11 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
     url: `http://127.0.0.1:${port}/`,
     port,
     token,
+    allTabsClosed: presence.allClosed,
     close: () =>
       new Promise((resolve) => {
-        // Browsers hold keep-alive connections open indefinitely.
+        presence.dispose();
+        // Browsers hold keep-alive connections (and presence streams) open indefinitely.
         server.closeAllConnections();
         server.close(() => resolve());
       }),

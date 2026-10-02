@@ -4,7 +4,7 @@
  * Keys reach the model exactly as they do in the terminal; clicks and form
  * fields send the pointer messages the model defines for them.
  */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 
 import { selectedTrack, type Deps, type Msg } from '../../app/model';
 import { LOADING_TEXT, NO_TRACKS_TEXT, SUBTITLE, TITLE, errorText, noMatchText, screen } from '../../app/presenter';
@@ -13,6 +13,7 @@ import { useArtworkStore } from './artwork';
 import { Footer } from './Footer';
 import { keyMessage } from './keys';
 import { usePlayer, type IFrameAPI } from './player';
+import type { Presence } from './presence';
 import { ThemeSwitch } from './ThemeSwitch';
 import { useTheme } from './theme';
 import { TrackDetails } from './TrackDetails';
@@ -48,14 +49,19 @@ export interface WebAppProps {
   loadPlayer?: () => Promise<IFrameAPI>;
   /** Injected in tests; opens a spotify: URI in the desktop app. */
   openUri?: (uri: string) => void;
+  /** The page's presence stream; without one the page never reports the server stopped. */
+  presence?: Presence;
 }
+
+const noPresence: Presence = { serverStopped: () => false, subscribe: () => () => {} };
 
 const openInApp = (uri: string) => {
   window.location.href = uri;
 };
 
-export function WebApp({ deps, loadPlayer, openUri = openInApp }: WebAppProps) {
+export function WebApp({ deps, loadPlayer, openUri = openInApp, presence = noPresence }: WebAppProps) {
   const { model, dispatch } = useTracker(deps);
+  const serverStopped = useSyncExternalStore(presence.subscribe, presence.serverStopped);
   const player = usePlayer(...(loadPlayer === undefined ? [] : [loadPlayer]));
   const [theme, setTheme] = useTheme();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -168,7 +174,9 @@ export function WebApp({ deps, loadPlayer, openUri = openInApp }: WebAppProps) {
         </div>
       </main>
 
-      {current !== 'loading' && current !== 'error' && <Footer model={model} dispatch={send} />}
+      {current !== 'loading' && current !== 'error' && (
+        <Footer model={model} dispatch={send} serverStopped={serverStopped} />
+      )}
     </div>
   );
 }

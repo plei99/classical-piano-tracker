@@ -1,5 +1,6 @@
 import type { Model, Msg } from '../../app/model';
 import { hints, status, type Hint } from '../../app/presenter';
+import { SERVER_STOPPED_TEXT } from './presence';
 
 /** Keys the web UI adds for its extra actions; shown only while browsing. */
 export const WEB_HINTS: readonly Hint[] = [
@@ -7,8 +8,17 @@ export const WEB_HINTS: readonly Hint[] = [
   { keys: 'a', label: 'open in Spotify', key: 'a' },
 ];
 
-export function Footer({ model, dispatch }: { model: Model; dispatch: (msg: Msg) => void }) {
-  const line = status(model);
+export function Footer({
+  model,
+  dispatch,
+  serverStopped = false,
+}: {
+  model: Model;
+  dispatch: (msg: Msg) => void;
+  /** Replaces the status line: nothing else on the page can work any more. */
+  serverStopped?: boolean;
+}) {
+  const line = serverStopped ? { text: SERVER_STOPPED_TEXT, isError: true } : status(model);
   const browsing = !model.editingRating && !model.searching;
   const shown = [...hints(model).filter((hint) => hint.terminalOnly !== true), ...(browsing ? WEB_HINTS : [])];
   return (

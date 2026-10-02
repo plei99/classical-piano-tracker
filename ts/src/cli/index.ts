@@ -278,8 +278,9 @@ function buildProgram(io: CliIo, deps: CliDeps): Command {
     examples('tracker web', 'tracker web --port 9000 --no-open', 'tracker --db ~/tmp/tracker.db web'),
   )
     .option('--port <int>', 'local port to serve on (0 picks a free one)', intFlag('port'), DEFAULT_WEB_PORT)
-    .option('--no-open', 'print the URL without opening a browser');
-  web.action(() => runWebCommand(ctx, web.opts<{ port: number; open: boolean }>()));
+    .option('--no-open', 'print the URL without opening a browser')
+    .option('--keep-running', 'keep serving after the last browser tab closes');
+  web.action(() => runWebCommand(ctx, web.opts<{ port: number; open: boolean; keepRunning?: boolean }>()));
 
   sub(program, 'version', 'Print build and version metadata', examples('tracker version', 'tracker --version')).action(
     () => {

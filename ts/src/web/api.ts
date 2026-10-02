@@ -9,6 +9,10 @@
  * `<meta name="tracker-token">` in the TOKEN_HEADER header; other sites can
  * neither read the token nor send that header without a CORS preflight, which
  * the server never approves.
+ *
+ * The presence stream is a GET, because EventSource cannot send headers, so
+ * it takes the token as a query parameter instead. A wrong or missing token
+ * gets the usual 403, so another site cannot hold the server open.
  */
 import type { Rating, SyncStats, Track, UpsertRatingParams } from '../core/model';
 
@@ -24,7 +28,16 @@ export const API = {
   ratings: '/api/ratings',
   /** GET ?ids=<spotify id>,<spotify id>... (at most ARTWORK_BATCH) -> ArtworkResponse */
   artwork: '/api/artwork',
+  /**
+   * GET ?token=<page token> -> text/event-stream that sends only comments
+   * (one at once, then one every 15 s) and never ends on its own. Each open
+   * page holds one; the server stops a few seconds after the last closes.
+   */
+  presence: '/api/presence',
 } as const;
+
+/** The query parameter that carries the page token on API.presence. */
+export const PRESENCE_TOKEN_PARAM = 'token';
 
 /** Spotify's track lookup accepts at most 50 IDs per request. */
 export const ARTWORK_BATCH = 50;

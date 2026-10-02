@@ -1,5 +1,6 @@
 /**
- * `tracker web`: serves the browser UI from a local server until Ctrl+C.
+ * `tracker web`: serves the browser UI from a local server until its last
+ * tab closes (or always, with --keep-running) or Ctrl+C.
  * Like `tracker tui`, it owns the database and the Spotify wiring and hands
  * the server plain callbacks.
  */
@@ -17,14 +18,18 @@ export interface WebCommandDeps {
   loadAssets: () => Promise<WebAssets>;
   startServer: (options: WebServerOptions) => Promise<WebServer>;
   openBrowser: (url: string) => void;
-  /** Resolves when the server should stop. */
-  waitForShutdown: () => Promise<void>;
+  /** Resolves on Ctrl+C or SIGTERM; stops listening once `done` aborts. */
+  waitForShutdown: (done: AbortSignal) => Promise<void>;
 }
 
 export interface WebCommandOptions {
   port: number;
   open: boolean;
+  /** Keep serving after the last browser tab closes. */
+  keepRunning?: boolean;
 }
+
+export const ALL_TABS_CLOSED_TEXT = 'All tabs closed; stopped the tracker web UI.';
 
 export function defaultWebDeps(): WebCommandDeps {
   return {
@@ -77,15 +82,33 @@ export async function runWebCommand(
       throw wrap('start web server', err);
     }
 
+    let tabsClosed = false;
+    const done = new AbortController();
     try {
-      ctx.out.write(`Serving the tracker web UI at ${server.url} (Ctrl+C to stop)\n`);
+      ctx.out.write(
+        options.keepRunning === true
+          ? `Serving the tracker web UI at ${server.url} (Ctrl+C to stop)\n`
+          : `Serving the tracker web UI at ${server.url} (stops when you close the tab, or press Ctrl+C)\n`,
+      );
       if (options.open) {
         deps.openBrowser(server.url);
       }
-      await deps.waitForShutdown();
+      const stops = [deps.waitForShutdown(done.signal)];
+      if (options.keepRunning !== true) {
+        stops.push(
+          server.allTabsClosed.then(() => {
+            tabsClosed = true;
+          }),
+        );
+      }
+      await Promise.race(stops);
     } finally {
+      done.abort();
       await server.close();
       artwork.close();
+    }
+    if (tabsClosed) {
+      ctx.out.write(`${ALL_TABS_CLOSED_TEXT}\n`);
     }
   });
 }
@@ -106,14 +129,16 @@ function openBrowser(url: string): void {
 }
 
 /** Taking over SIGINT/SIGTERM replaces Node's immediate exit, so the server and artwork cache close cleanly. */
-function waitForShutdown(): Promise<void> {
+function waitForShutdown(done: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const stop = (): void => {
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
+      done.removeEventListener('abort', stop);
       resolve();
     };
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
+    done.addEventListener('abort', stop);
   });
 }

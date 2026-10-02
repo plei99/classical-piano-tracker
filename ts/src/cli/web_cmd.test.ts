@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
 
-import { TOKEN_HEADER } from '../web/api';
+import { API, PRESENCE_TOKEN_PARAM, TOKEN_HEADER } from '../web/api';
 import { startWebServer, type WebAssets } from '../web/server';
 import { Context, RootOptions } from './context';
 import { fakeOnboardingDeps, MemoryOut, run, tempDir } from './testutil';
@@ -25,11 +25,16 @@ function context(): { ctx: Context; stdout: MemoryOut; configPath: string } {
   return { ctx, stdout, configPath };
 }
 
+const GRACE_MS = 50;
+
 /**
- * Real server on a free port with fake assets; `visit` runs while it is up,
- * standing in for the user's browser session before Ctrl+C.
+ * Real server on a free port with fake assets and a short presence grace
+ * period; `visit` runs while it is up, standing in for the user's browser
+ * session, and Ctrl+C comes when it resolves.
  */
-function fakeDeps(visit: (url: string) => Promise<void>): WebCommandDeps & { opened: string[]; url: () => string } {
+function fakeDeps(
+  visit: (url: string, done: AbortSignal) => Promise<void>,
+): WebCommandDeps & { opened: string[]; url: () => string } {
   const opened: string[] = [];
   let url = '';
   return {
@@ -37,14 +42,32 @@ function fakeDeps(visit: (url: string) => Promise<void>): WebCommandDeps & { ope
     url: () => url,
     loadAssets: () => Promise.resolve(ASSETS),
     startServer: async (options) => {
-      const server = await startWebServer(options);
+      const server = await startWebServer({ ...options, presenceGraceMs: GRACE_MS });
       url = server.url;
       return server;
     },
     openBrowser: (target) => void opened.push(target),
-    waitForShutdown: () => visit(url),
+    waitForShutdown: (done) => visit(url, done),
   };
 }
+
+/** Opens the page's presence stream, as the client does at start; resolves once the server has answered. */
+async function openTab(url: string): Promise<() => void> {
+  const page = await (await fetch(url)).text();
+  const token = /content="([0-9a-f]{32})"/.exec(page)![1]!;
+  const abort = new AbortController();
+  const stream = await fetch(`${url}${API.presence.slice(1)}?${PRESENCE_TOKEN_PARAM}=${token}`, {
+    signal: abort.signal,
+  });
+  expect(stream.status).toBe(200);
+  await stream.body!.getReader().read();
+  return () => abort.abort();
+}
+
+/** No Ctrl+C: stays pending until the command stops listening. */
+const noSignal = (done: AbortSignal) => new Promise<void>((resolve) => done.addEventListener('abort', () => resolve()));
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('tracker web', () => {
   it('prints the URL, opens the browser, serves until shutdown, then closes', async () => {
@@ -61,7 +84,9 @@ describe('tracker web', () => {
     await runWebCommand(ctx, { port: 0, open: true }, deps);
 
     const url = deps.url();
-    expect(stdout.text()).toBe(`Serving the tracker web UI at ${url} (Ctrl+C to stop)\n`);
+    expect(stdout.text()).toBe(
+      `Serving the tracker web UI at ${url} (stops when you close the tab, or press Ctrl+C)\n`,
+    );
     expect(deps.opened).toEqual([url]);
     expect(page).toMatch(/^<meta content="[0-9a-f]{32}">$/);
     // Sync goes through the CLI's config path, with the hint naming the web UI.
@@ -70,6 +95,48 @@ describe('tracker web', () => {
         `run \`tracker --config ${JSON.stringify(configPath)} spotify login\`, then retry sync from the web UI`,
     );
     await expect(fetch(url)).rejects.toThrow();
+  });
+
+  it('stops on its own once the last tab closes', async () => {
+    const { ctx, stdout } = context();
+    let closedAt = 0;
+    const deps = fakeDeps(async (url, done) => {
+      const [closeFirst, closeSecond] = await Promise.all([openTab(url), openTab(url)]);
+      closeFirst!();
+      // A reload: the old stream closes, the new one opens within the grace period.
+      await sleep(GRACE_MS / 3);
+      closeSecond!();
+      const reloaded = await openTab(url);
+      await sleep(GRACE_MS * 3);
+      expect(stdout.text()).not.toContain('All tabs closed');
+      closedAt = Date.now();
+      reloaded();
+      await noSignal(done);
+    });
+
+    await runWebCommand(ctx, { port: 0, open: false }, deps);
+
+    expect(Date.now() - closedAt).toBeGreaterThanOrEqual(GRACE_MS - 5);
+    expect(stdout.text()).toBe(
+      `Serving the tracker web UI at ${deps.url()} (stops when you close the tab, or press Ctrl+C)\n` +
+        'All tabs closed; stopped the tracker web UI.\n',
+    );
+    await expect(fetch(deps.url())).rejects.toThrow();
+  });
+
+  it('keeps serving after the last tab closes with --keep-running', async () => {
+    const { ctx, stdout } = context();
+    let servingAfterClose = false;
+    const deps = fakeDeps(async (url) => {
+      (await openTab(url))();
+      await sleep(GRACE_MS * 3);
+      servingAfterClose = (await fetch(url)).ok;
+    });
+
+    await runWebCommand(ctx, { port: 0, open: false, keepRunning: true }, deps);
+
+    expect(servingAfterClose).toBe(true);
+    expect(stdout.text()).toBe(`Serving the tracker web UI at ${deps.url()} (Ctrl+C to stop)\n`);
   });
 
   it('skips the browser with --no-open', async () => {
@@ -105,6 +172,8 @@ describe('tracker web', () => {
     expect(help.stdout).toContain('--port <int>');
     expect(help.stdout).toContain('(default: 8765)');
     expect(help.stdout).toContain('--no-open');
+    expect(help.stdout).toContain('--keep-running');
+    expect(help.stdout).toContain('keep serving after the last browser tab closes');
     expect(help.stdout).toContain('tracker web --port 9000 --no-open');
 
     const bad = await run(['web', '--port', '70000']);

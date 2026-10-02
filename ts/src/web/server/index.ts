@@ -16,6 +16,7 @@ export {
 export {
   CONTENT_SECURITY_POLICY,
   MAX_BODY_BYTES,
+  PRESENCE_GRACE_MS,
   startWebServer,
   TOKEN_PLACEHOLDER,
   type WebAssets,

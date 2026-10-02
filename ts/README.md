@@ -69,29 +69,34 @@ bundle and Spotify's scripts can run.
 | `src/web`       | (new)                   | `tracker web`: a local HTTP server (`server/`) and the React DOM client (`client/`), bundled into the binary.                                                                                      |
 | `src/cli`       | `cli`, `buildinfo`      | commander. stdout, errors and exit codes match Go. Ink and React are only loaded by commands that draw.                                                                                            |
 
-## Compared with the Go and Rust builds
+## Compared with the other builds
 
-These numbers come from one Apple Silicon Mac and a copy of a real database
-with 543 tracks and 205 ratings. All builds ran interleaved; each figure is
-the median wall time, including process start.
+Measured on one Apple Silicon Mac against a copy of a real database (543
+tracks, 205 ratings). All five release builds ran interleaved in one
+session, and each figure is the median wall time including process start.
 
-|                                   | Go      | Rust    | TS (Bun binary) | TS (Node)     |
-| --------------------------------- | ------- | ------- | --------------- | ------------- |
-| Artifact size                     | 23.3 MB | 6.4 MB  | 62.9 MB         | 0.6 MB + Node |
-| `tracker version`                 | 8.2 ms  | 2.9 ms  | 25.1 ms         | 73.0 ms       |
-| `tracker list recent --limit 50`  | 8.8 ms  | 4.2 ms  | 28.4 ms         | 75.4 ms       |
-| `tracker recommend profile`       | 10.2 ms | 4.6 ms  | 33.1 ms         | 82.7 ms       |
-| `tracker tui` to first list frame | 22.3 ms | 11.8 ms | 66.6 ms         | 136.4 ms      |
-| TUI keypress to redraw            | 9.6 ms  | 1.1 ms  | 9.3 ms          | 8.8 ms        |
+|                                   | Go      | Rust    | TS (Bun binary) | Python (PyApp binary) | Swift   |
+| --------------------------------- | ------- | ------- | --------------- | --------------------- | ------- |
+| Artifact size                     | 23.3 MB | 6.4 MB  | 63.1 MB         | 33.5 MB               | 4.4 MB  |
+| `tracker version`                 | 7.7 ms  | 3.0 ms  | 25.0 ms         | 38.8 ms               | 6.4 ms  |
+| `tracker list recent --limit 50`  | 8.2 ms  | 4.2 ms  | 27.8 ms         | 47.5 ms               | 9.0 ms  |
+| `tracker recommend profile`       | 9.4 ms  | 4.4 ms  | 32.1 ms         | 57.5 ms               | 10.9 ms |
+| `tracker tui` to first list frame | 21.1 ms | 12.2 ms | 65.8 ms         | 124.0 ms              | 14.6 ms |
+| TUI keypress to redraw            | 9.6 ms  | 0.75 ms | 9.2 ms          | 3.6 ms                | 0.46 ms |
+
+The Python binary unpacks itself into a cache on its first run, which takes
+about 1.4 s; the figures above are for later runs.
 
 - **Startup** is mostly runtime and module evaluation. Bun starts about 2–3×
   faster than Node, and the compiled binary is the fastest TypeScript
-  option.
+  option. In an earlier run, the same bundle on Node took 73 ms for
+  `tracker version` and 136 ms to the first TUI frame.
 - **Keypress latency** is computation, not waiting. Ink's default 30 fps cap
   added about 20 ms, so it is raised to 1000. What remains is about 2 ms of
   React reconciliation plus about 5 ms of Ink building the 160×48 frame,
   both inside the libraries. That lands level with Go, which waits for
-  Bubble Tea's frame tick, and well behind Rust, which redraws immediately.
+  Bubble Tea's frame tick, and well behind Rust and Swift, which redraw
+  immediately.
 
 Output is byte-identical to Go for every read-only command checked, and so
 are argument and validation errors. TUI screens are identical too, checked

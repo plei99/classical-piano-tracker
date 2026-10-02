@@ -128,51 +128,54 @@ bundle and Spotify's scripts can run.
 
 ### Web UI performance compared with the other builds
 
-These numbers predate the hybrid design above (they describe the TS build
-downloading the whole library).
-
 Measured with `scripts/bench-web` (on `main`): headless Chromium driving all
 four `tracker web` builds round-robin, 5 runs, with every request outside
-127.0.0.1 blocked. The machine carried unrelated background load (load
-average about 7), so absolute times are inflated; the comparisons hold.
-Medians in ms unless noted.
+127.0.0.1 blocked. The TypeScript and Rust builds are the hybrid design
+(server-owned library, server-rendered first screen, compressed responses);
+Go and Swift are server-driven. The machine carried unrelated background
+load (load average about 7), so absolute times are inflated; the
+comparisons hold. Medians in ms unless noted; key latencies are keydown to
+the DOM showing the change.
 
-| 543 tracks (real data)                |        TS |         Go |                 Rust |      Swift |
-| ------------------------------------- | --------: | ---------: | -------------------: | ---------: |
-| Server ready                          |        36 |         14 |                   11 |         21 |
-| Cold load to interactive              |        51 |         45 |                   59 |         44 |
-| Warm reload to interactive            |        30 |         25 |                   31 |         28 |
-| Cold transfer                         |   444 KiB |    134 KiB | 1,192 KiB (945 wasm) |    135 KiB |
-| `j`: keydown to DOM / to next frame   | 0.9 / 4.9 | 6.9 / 21.2 |            0.9 / 4.8 | 7.0 / 21.4 |
-| Sort (`o`) / search keystroke, to DOM | 1.9 / 1.0 |  6.2 / 6.7 |            1.8 / 0.9 |  6.0 / 6.6 |
-| Enter to "Saved"                      |      16.8 |        4.7 |                 17.0 |        5.2 |
-| Bytes per `j`                         |       721 |     45,078 |                  544 |     46,242 |
-| Server memory after interactions      |    49 MiB |     41 MiB |                9 MiB |     27 MiB |
-| Tab closed to process exit            |     3,018 |      3,013 |                3,013 |      3,022 |
+| 543 tracks (real data)           |          TS |           Go |         Rust |        Swift |
+| -------------------------------- | ----------: | -----------: | -----------: | -----------: |
+| Server ready                     |          62 |           21 |           11 |           26 |
+| First row on screen              |           9 |            9 |            9 |            9 |
+| Cold / warm load to interactive  |     71 / 26 |      59 / 30 |      79 / 30 |      60 / 32 |
+| Cold / warm reload transfer      | 84 / 12 KiB | 134 / 87 KiB | 302 / 12 KiB | 135 / 89 KiB |
+| `j`                              |         1.2 |          7.1 |          1.2 |          7.1 |
+| `o` sort / search keystroke      |   6.7 / 6.5 |    6.1 / 6.8 |    5.7 / 6.3 |    6.0 / 6.8 |
+| Enter to "Saved"                 |        16.9 |          5.2 |         17.2 |          5.9 |
+| Bytes per `j`                    |         109 |       45,078 |           71 |       46,242 |
+| Server memory after interactions |      80 MiB |       37 MiB |       24 MiB |       25 MiB |
+| Tab closed to process exit       |       3,016 |        3,010 |        3,010 |        3,021 |
 
-| 25,000 tracks (synthetic)          |               TS |              Go |            Rust |           Swift |
-| ---------------------------------- | ---------------: | --------------: | --------------: | --------------: |
-| Server ready                       |               53 |             101 |              22 |             150 |
-| Cold / warm load to interactive    |         114 / 95 |         73 / 59 |        121 / 98 |         63 / 52 |
-| Cold transfer                      |        7,290 KiB |         131 KiB |       8,039 KiB |         133 KiB |
-| `j` / `G` / `o`, to DOM            | 0.9 / 17.7 / 7.0 | 6.9 / 6.1 / 9.0 | 0.9 / 2.9 / 3.7 | 6.8 / 6.1 / 6.0 |
-| Server memory after interactions   |          179 MiB |         441 MiB |          59 MiB |         208 MiB |
-| Server CPU for the interaction run |               90 |             540 |              20 |             720 |
+| 25,000 tracks (synthetic)          |              TS |               Go |            Rust |           Swift |
+| ---------------------------------- | --------------: | ---------------: | --------------: | --------------: |
+| Server ready                       |             122 |              155 |              64 |             228 |
+| First row on screen                |               9 |               60 |               9 |              47 |
+| Cold / warm load to interactive    |         57 / 28 |          99 / 78 |         67 / 30 |         88 / 70 |
+| Cold transfer                      |          85 KiB |          131 KiB |         304 KiB |         133 KiB |
+| `j` / `G` / `o`                    | 1.2 / 1.7 / 5.6 | 7.0 / 5.5 / 13.0 | 1.3 / 2.2 / 4.9 | 7.2 / 5.5 / 7.7 |
+| Server memory after interactions   |         144 MiB |          328 MiB |          66 MiB |         257 MiB |
+| Server CPU for the interaction run |             270 |              680 |             160 |             900 |
 
-The two designs trade in opposite directions:
-
-- **Client-side (TS, Rust):** keys never leave the page, so interaction is
-  about 1 ms. The price is the download: the whole library arrives as JSON
-  (7 MB at 25,000 tracks, uncompressed and refetched on every reload), and
-  Rust's WebAssembly client is about 1 MB.
-- **Server-driven (Go, Swift):** a page is about 130 KiB at any library
-  size and the first rows arrive in the HTML, but every key is a localhost
-  round trip that returns the re-rendered page body (about 45 KB per key).
-  Server work and DOM update total about 1.7 ms; the rest of the 7 ms is
-  the browser scheduling the response. Each tab's session also keeps its
-  own copy of the library on the server.
-
-No build compresses responses yet.
+- **Moving through the list** stays in the page for TS and Rust (about
+  1 ms, no network); Go and Swift make a localhost round trip per key
+  (about 7 ms, about 45 KB of HTML).
+- **Search and sort** are a round trip in all four builds now, about 6 ms.
+  Most of that is the browser scheduling the response, not server work.
+- **Page weight no longer grows with the library**: TS sends about 85 KiB
+  and Rust about 300 KiB (mostly its 279 KiB compressed WebAssembly client)
+  at either size, and a warm reload is about 12 KiB because their assets
+  are cached and compressed. Go and Swift send about 130 KiB uncompressed.
+- **At 25,000 tracks** the hybrids load fastest (57 and 67 ms to
+  interactive) because the server holds one shared, presorted copy of the
+  library, while Go and Swift build a model per tab, which also drives
+  their memory and CPU.
+- Saving a rating shows "Saved" about 12 ms later in TS and Rust than in Go
+  and Swift: the response arrives in a few ms, but the page waits for a
+  frame before applying it.
 
 ## Layout
 

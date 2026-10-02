@@ -66,6 +66,51 @@ page, so another site cannot keep the server running. Spotify's player
 requires `'unsafe-eval'` in the page's script policy; only this app's
 bundle and Spotify's scripts can run.
 
+### Web UI performance compared with the other builds
+
+Measured with `scripts/bench-web` (on `main`): headless Chromium driving all
+four `tracker web` builds round-robin, 5 runs, with every request outside
+127.0.0.1 blocked. The machine carried unrelated background load (load
+average about 7), so absolute times are inflated; the comparisons hold.
+Medians in ms unless noted.
+
+| 543 tracks (real data) | TS | Go | Rust | Swift |
+|---|--:|--:|--:|--:|
+| Server ready | 36 | 14 | 11 | 21 |
+| Cold load to interactive | 51 | 45 | 59 | 44 |
+| Warm reload to interactive | 30 | 25 | 31 | 28 |
+| Cold transfer | 444 KiB | 134 KiB | 1,192 KiB (945 wasm) | 135 KiB |
+| `j`: keydown to DOM / to next frame | 0.9 / 4.9 | 6.9 / 21.2 | 0.9 / 4.8 | 7.0 / 21.4 |
+| Sort (`o`) / search keystroke, to DOM | 1.9 / 1.0 | 6.2 / 6.7 | 1.8 / 0.9 | 6.0 / 6.6 |
+| Enter to "Saved" | 16.8 | 4.7 | 17.0 | 5.2 |
+| Bytes per `j` | 721 | 45,078 | 544 | 46,242 |
+| Server memory after interactions | 49 MiB | 41 MiB | 9 MiB | 27 MiB |
+| Tab closed to process exit | 3,018 | 3,013 | 3,013 | 3,022 |
+
+| 25,000 tracks (synthetic) | TS | Go | Rust | Swift |
+|---|--:|--:|--:|--:|
+| Server ready | 53 | 101 | 22 | 150 |
+| Cold / warm load to interactive | 114 / 95 | 73 / 59 | 121 / 98 | 63 / 52 |
+| Cold transfer | 7,290 KiB | 131 KiB | 8,039 KiB | 133 KiB |
+| `j` / `G` / `o`, to DOM | 0.9 / 17.7 / 7.0 | 6.9 / 6.1 / 9.0 | 0.9 / 2.9 / 3.7 | 6.8 / 6.1 / 6.0 |
+| Server memory after interactions | 179 MiB | 441 MiB | 59 MiB | 208 MiB |
+| Server CPU for the interaction run | 90 | 540 | 20 | 720 |
+
+The two designs trade in opposite directions:
+
+- **Client-side (TS, Rust):** keys never leave the page, so interaction is
+  about 1 ms. The price is the download: the whole library arrives as JSON
+  (7 MB at 25,000 tracks, uncompressed and refetched on every reload), and
+  Rust's WebAssembly client is about 1 MB.
+- **Server-driven (Go, Swift):** a page is about 130 KiB at any library
+  size and the first rows arrive in the HTML, but every key is a localhost
+  round trip that returns the re-rendered page body (about 45 KB per key).
+  Server work and DOM update total about 1.7 ms; the rest of the 7 ms is
+  the browser scheduling the response. Each tab's session also keeps its
+  own copy of the library on the server.
+
+No build compresses responses yet.
+
 ## Layout
 
 | Directory       | Ports                   | Notes                                                                                                                                                                                              |

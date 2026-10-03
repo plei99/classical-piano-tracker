@@ -1,0 +1,42 @@
+{
+  "name": "tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Track your Spotify classical piano listening history from the terminal and the browser",
+  "type": "module",
+  "bin": {
+    "tracker": "dist/tracker.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "build:bin": "node scripts/build.mjs && bun build dist/tracker.js --compile --minify --outfile dist/tracker"
+  },
+  "dependencies": {
+    "cli-truncate": "^6.1.1",
+    "commander": "^15.0.0",
+    "ink": "^7.1.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "string-width": "^8.3.0",
+    "wrap-ansi": "^10.0.2"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^20.14.5",
+    "ink-testing-library": "^4.0.0",
+    "prettier": "^3.9.9",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

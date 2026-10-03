@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Runs tracker against a sandbox copy of your config and database, so
+# experiments (ratings, config edits, syncs) never touch the real ones.
+#
+#   tracker-sandbox [args...]   run tracker on the sandbox (e.g. `tracker-sandbox tui`)
+#   tracker-sandbox reset       re-copy the real config and database
+#   tracker-sandbox path        print the sandbox directory
+#
+# The first run creates the sandbox automatically. TRACKER_BIN picks the
+# binary (default: `tracker` on PATH), e.g. TRACKER_BIN=dist/tracker.
+set -euo pipefail
+
+if [ "$(uname -s)" = Darwin ]; then
+	real_config="$HOME/Library/Application Support/piano-tracker/config.json"
+	real_db="$HOME/Library/Application Support/piano-tracker/tracker.db"
+	default_sandbox="$HOME/Library/Application Support/piano-tracker-sandbox"
+else
+	real_config="${XDG_CONFIG_HOME:-$HOME/.config}/piano-tracker/config.json"
+	real_db="${XDG_DATA_HOME:-$HOME/.local/share}/piano-tracker/tracker.db"
+	default_sandbox="${XDG_DATA_HOME:-$HOME/.local/share}/piano-tracker-sandbox"
+fi
+sandbox=${TRACKER_SANDBOX:-$default_sandbox}
+
+reset_sandbox() {
+	umask 077
+	mkdir -p "$sandbox"
+	rm -f "$sandbox/config.json" "$sandbox/tracker.db" "$sandbox/tracker.db-wal" "$sandbox/tracker.db-shm"
+	if [ -f "$real_config" ]; then
+		cp "$real_config" "$sandbox/config.json"
+	fi
+	if [ -f "$real_db" ]; then
+		# The online backup API gives a consistent copy even if the hourly
+		# sync is writing to the database right now.
+		if command -v sqlite3 >/dev/null; then
+			sqlite3 "$real_db" ".backup '$sandbox/tracker.db'"
+		else
+			cp "$real_db" "$sandbox/tracker.db"
+		fi
+	fi
+	echo "sandbox reset from real data: $sandbox" >&2
+}
+
+case "${1:-}" in
+reset)
+	reset_sandbox
+	;;
+path)
+	echo "$sandbox"
+	;;
+*)
+	[ -d "$sandbox" ] || reset_sandbox
+	# exec so the TUI owns the terminal directly (signals, resizes, exit status).
+	exec "${TRACKER_BIN:-tracker}" --config "$sandbox/config.json" --db "$sandbox/tracker.db" "$@"
+	;;
+esac

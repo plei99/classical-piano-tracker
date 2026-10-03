@@ -4,18 +4,16 @@ LAUNCH_AGENT_LABEL := com.plei99.piano-tracker.sync
 LAUNCH_AGENT_TEMPLATE := launchd/$(LAUNCH_AGENT_LABEL).plist.in
 LAUNCH_AGENT_PATH := $(HOME)/Library/LaunchAgents/$(LAUNCH_AGENT_LABEL).plist
 LAUNCH_LOG_DIR := $(HOME)/Library/Logs/piano-tracker
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS := -X github.com/plei99/classical-piano-tracker/internal/buildinfo.Version=$(VERSION) -X github.com/plei99/classical-piano-tracker/internal/buildinfo.Commit=$(COMMIT) -X github.com/plei99/classical-piano-tracker/internal/buildinfo.Date=$(BUILD_DATE)
 
-.PHONY: build install
-build:
-	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/tracker
+.PHONY: build install check
+build: node_modules
+	npm run --silent build:bin
 
+# Builds the standalone binary (dist/tracker, via Bun), installs it, and on
+# macOS (re)loads the launch agent that runs `tracker sync` every hour.
 install: build
 	mkdir -p "$(BINDIR)"
-	install -m 0755 "$(BIN)" "$(BINDIR)/$(BIN)"
+	install -m 0755 dist/$(BIN) "$(BINDIR)/$(BIN)"
 	if [ "$$(uname -s)" = "Darwin" ]; then \
 		mkdir -p "$$(dirname "$(LAUNCH_AGENT_PATH)")" "$(LAUNCH_LOG_DIR)"; \
 		sed \
@@ -28,3 +26,13 @@ install: build
 		launchctl enable "gui/$$(id -u)/$(LAUNCH_AGENT_LABEL)"; \
 		launchctl kickstart -k "gui/$$(id -u)/$(LAUNCH_AGENT_LABEL)"; \
 	fi
+
+# Typecheck, formatting, and tests: what must pass before committing.
+check: node_modules
+	npm run --silent typecheck
+	npm run --silent format:check
+	npm test --silent
+
+node_modules: package.json package-lock.json
+	npm ci --no-audit --no-fund
+	touch node_modules

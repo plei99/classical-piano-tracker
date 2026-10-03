@@ -1,6 +1,6 @@
 # Classical Piano Tracker
 
-A Go CLI/TUI for tracking, filtering, rating, and exploring your classical piano listening history from Spotify.
+A command-line tool, terminal UI, and local web UI for tracking, filtering, rating, and exploring your classical piano listening history from Spotify. Written in TypeScript.
 
 ## Warning
 
@@ -9,12 +9,12 @@ Based on the author's testing so far, `gpt-5.4` seems to produce the best recomm
 
 ## Stack
 
-- Go
-- Cobra for the CLI
-- Bubble Tea and Lip Gloss for the TUI
-- SQLite via `modernc.org/sqlite`
-- `sqlc` for all database access
-- Spotify via `zmb3/spotify`
+- TypeScript, bundled with esbuild and compiled to a single binary with Bun
+  (the bundle also runs on Node 24+)
+- commander for the CLI
+- React, drawn with Ink in the terminal and with React DOM in the browser
+- SQLite via the runtime's built-in `node:sqlite`
+- Spotify's Web API over `fetch`
 
 ## What It Does
 
@@ -22,13 +22,13 @@ Based on the author's testing so far, `gpt-5.4` seems to produce the best recomm
 - On macOS, keep that database updated automatically with an hourly `launchd` sync job installed by `make install`
 - Filter synced tracks through a pianist allowlist and artist blocklist
 - Rate tracks with stars and optional comments
-- Browse, sync, and rate tracks in a terminal UI
+- Browse, sync, and rate tracks in a terminal UI, or in a browser tab with album art and in-page playback
 - Rank your favorite pianists from local ratings and replay counts
 - Generate LLM-backed recommendations for new pianists, then validate them against Spotify
 
 ## Requirements
 
-- Go installed locally
+- Node 24 or later and npm, plus [Bun](https://bun.sh) to build the standalone binary
 - a Spotify developer application with a client ID and client secret
 - a Spotify account with listening history to sync
 - optionally, an LLM API key, a local Ollama model, or a signed-in Codex/Claude Code CLI for taste summaries and pianist recommendations
@@ -38,7 +38,7 @@ Based on the author's testing so far, `gpt-5.4` seems to produce the best recomm
 The app keeps config and data separate.
 
 - Config path:
-  resolved with `os.UserConfigDir()`
+  resolved per platform
   - macOS default: `~/Library/Application Support/piano-tracker/config.json`
   - Linux default: `~/.config/piano-tracker/config.json`
 - Database path:
@@ -56,8 +56,7 @@ tracker --config /custom/config.json --db /custom/tracker.db ...
 ## Installation
 
 ```bash
-go build ./...
-make build
+make build     # dist/tracker: a standalone binary (installs npm dependencies first)
 make install
 ```
 
@@ -87,8 +86,9 @@ make install BINDIR=/usr/local/bin
 If you do not want to install it globally, you can still run it from the repo:
 
 ```bash
-go run ./cmd/tracker --help
-go run ./cmd/tracker version
+npm install
+npm run build              # dist/tracker.js, runs on Node 24+ or Bun
+node dist/tracker.js --help
 ```
 
 ## First-Time Setup
@@ -96,7 +96,7 @@ go run ./cmd/tracker version
 The quickest path is:
 
 ```bash
-go run ./cmd/tracker onboarding
+tracker onboarding
 ```
 
 That interactive flow collects:
@@ -152,7 +152,7 @@ Any config-aware command will create a default config file if one does not exist
 For example:
 
 ```bash
-go run ./cmd/tracker config validate
+tracker config validate
 ```
 
 Then edit the generated config file and set:
@@ -229,7 +229,7 @@ Minimal manual config steps:
 After saving the file, validate it with:
 
 ```bash
-go run ./cmd/tracker config validate
+tracker config validate
 ```
 
 ### 2. Configure Spotify redirect URI
@@ -243,7 +243,7 @@ http://127.0.0.1:8000/api/auth/spotify/callback
 ### 3. Run Spotify login
 
 ```bash
-go run ./cmd/tracker spotify login
+tracker spotify login
 ```
 
 The CLI prints a URL to open in your browser. After login, the OAuth token is stored in the config file.
@@ -253,14 +253,14 @@ The CLI prints a URL to open in your browser. After login, the OAuth token is st
 ### Sync recent listening history
 
 ```bash
-go run ./cmd/tracker sync
+tracker sync
 ```
 
 Optional:
 
 ```bash
-go run ./cmd/tracker sync --limit 50
-go run ./cmd/tracker sync status
+tracker sync --limit 50
+tracker sync status
 ```
 
 Sync behavior:
@@ -277,10 +277,10 @@ checkpoint, or `Last sync: never` if no sync checkpoint has been written yet.
 ### Browse local tracks in the CLI
 
 ```bash
-go run ./cmd/tracker list recent
-go run ./cmd/tracker list top
-go run ./cmd/tracker list unrated
-go run ./cmd/tracker show 12
+tracker list recent
+tracker list top
+tracker list unrated
+tracker show 12
 ```
 
 ### Rate tracks
@@ -288,20 +288,20 @@ go run ./cmd/tracker show 12
 Strict rating by ID:
 
 ```bash
-go run ./cmd/tracker rate --track-id 12 --stars 5 --opinion "Explosive and clear"
+tracker rate --track-id 12 --stars 5 --opinion "Explosive and clear"
 ```
 
 Interactive rating flow:
 
 ```bash
-go run ./cmd/tracker rate-prompt
-go run ./cmd/tracker rate-prompt --unrated
+tracker rate-prompt
+tracker rate-prompt --unrated
 ```
 
 ### Use the TUI
 
 ```bash
-go run ./cmd/tracker tui
+tracker tui
 ```
 
 Current TUI features:
@@ -341,6 +341,111 @@ Inside the rating editor:
 - `enter`: save
 - `esc`: cancel
 
+## Web UI
+
+```bash
+tracker web                  # serves http://127.0.0.1:8765/ and opens your browser
+tracker web --port 9000 --no-open
+tracker web --keep-running   # keep serving after the last tab closes
+scripts/tracker-sandbox web  # the same, on a copy of your data
+```
+
+It stops by itself 3 seconds after its last browser tab closes (a reload
+does not count), once any sync or rating save has finished, and prints
+`All tabs closed; stopped the tracker web UI.` Until a tab has connected it
+waits indefinitely, so `--no-open` still works. Each page holds
+`GET /api/presence?token=<page token>`, an event stream of comments, open
+for as long as it is open; if that stream stays down, the footer reports
+that `tracker web` has stopped.
+
+The web UI looks like the TUI and uses the same keys: j/k, g/G, `/` to
+search, o to sort, s to sync, e or Enter to rate, and r to reload. It
+adds:
+
+- **Album art** in every row and large in the detail pane. It is looked up
+  through Spotify's API, falling back to Spotify's public oEmbed endpoint
+  when there is no usable token, and cached in `artwork-cache.json` next
+  to the database.
+- **Play** (or p), which plays in the page through Spotify's embed. That
+  is the full track when this browser is signed in to Spotify Premium, and
+  a 30-second preview otherwise. The player is docked above the footer and
+  keeps playing while you browse.
+- **Open in Spotify** (or a), a `spotify:track:` link that macOS hands to
+  the Spotify app.
+- **A light/dark/auto switch.** Auto follows the system setting; your
+  choice is remembered per browser in the `tracker-theme` cookie, which
+  the server reads to render the page in that theme (no flash, no boot
+  script).
+
+The TUI and the web UI share their state machine (`src/app/model.ts`),
+their wording and layout decisions (`src/app/presenter.ts`), and the React
+hook that runs them (`src/app/useTracker.ts`). Only the drawing differs:
+Ink on a character grid in `src/tui`, React DOM with CSS in
+`src/web/client`.
+
+### How the work is split
+
+The web UI is a hybrid: the server owns the library and the browser owns
+the UI state.
+
+- **The server** (`src/web/server`) reads tracks and ratings once, at
+  startup and again on reload, after a sync, and when a rating is saved
+  (each bumps the library's `version`). It keeps the list in all four sort
+  orders and answers windowed queries with the TUI's own sort and search
+  code (`LocalTrackList` in `src/app/list.ts`), so both front ends always
+  agree. `GET /` is rendered on the server with `react-dom/server`: the
+  first screen (newest first, first track selected, the first 100 rows),
+  plus the data it was rendered from in
+  `<script type="application/json" id="tracker-initial">`. Reloading the
+  page shows the server's copy; r re-reads the database (say, after a
+  `tracker sync` in another terminal).
+- **The browser** hydrates that page (`hydrateRoot`) and runs the TUI's
+  model over a `RemoteTrackList` (`src/web/client/remoteList.ts`): a
+  sparse cache of rows for one sort, query, and library version. Moving
+  between loaded rows never touches the network. The list pane fetches
+  100-row chunks ahead of the selection and the scroll position (two
+  screens each way), so holding j/k or scrolling does not reach an
+  unloaded row in practice; one that has not arrived yet is drawn as a
+  placeholder of the same height. g/G jump by index and fetch the window
+  they land in.
+- **The model** works over a small list interface (count, row lookup,
+  index of a track; `TrackList` in `src/app/list.ts`). The TUI's in-memory
+  list re-sorts and filters synchronously, exactly as before. A remote list
+  turns re-sorting, searching, and reloading into `/api/view` requests
+  (`around` keeps the selected track selected, as the TUI does); answers to
+  superseded requests are dropped, and the counts and sort label describe
+  the rows on screen until the new ones arrive. A saved rating shows at
+  once; rows that later come back from a newer library version make the
+  page refetch around the selection, keeping the old rows on screen until
+  then.
+
+The API (types and details in `src/web/api.ts`):
+
+- `GET /`: the server-rendered page.
+- `GET /api/view?sort=&q=&offset=&limit=[&around=]`: a window of the list,
+  `{version, total, matched, offset, rows, index}`. Each row is
+  `{track, rating, artists}`, plus `art` when the artwork cache already
+  knows the track. `limit` is 1 to 500.
+- `POST /api/reload`: re-reads the database, `{version, total}`.
+- `POST /api/sync`: syncs with Spotify, then reloads the library.
+- `POST /api/ratings`: saves a rating.
+- `GET /api/artwork?ids=`: album art for up to 50 tracks.
+- `GET /api/presence?token=`: the tab's presence stream.
+
+Responses are compressed when the browser allows: the script and
+stylesheet are compressed with brotli and gzip at build time
+(`scripts/build.mjs`) and embedded that way, and JSON and HTML over 1 KiB
+are compressed per response. The presence stream never is. The page
+renderer (`src/web/server/page.tsx` with React's server renderer) is
+embedded as a separate chunk that only `tracker web` evaluates, so it adds
+nothing to the startup of other commands.
+
+The server listens on 127.0.0.1 only and rejects other Host headers. Every
+write, and the presence stream, needs a per-launch token embedded in the
+page, so another site cannot keep the server running. Spotify's player
+requires `'unsafe-eval'` in the page's script policy; only this app's
+bundle and Spotify's scripts can run.
+
 ## Recommendations
 
 ### Taste profile
@@ -349,7 +454,7 @@ This prints the local profile assembled from your database and allowlist, withou
 calling any LLM provider or Spotify validation.
 
 ```bash
-go run ./cmd/tracker recommend profile
+tracker recommend profile
 ```
 
 The output includes corpus totals, favorite pianists, loved/disliked tracks,
@@ -362,8 +467,8 @@ This builds the same local profile and asks the active LLM provider for a prose
 summary of your listening taste, without requesting new pianist recommendations.
 
 ```bash
-go run ./cmd/tracker recommend summary
-LLM_PROFILE=anthropic go run ./cmd/tracker recommend summary
+tracker recommend summary
+LLM_PROFILE=anthropic tracker recommend summary
 ```
 
 ### Favorite pianists
@@ -371,8 +476,8 @@ LLM_PROFILE=anthropic go run ./cmd/tracker recommend summary
 This is deterministic and local-only.
 
 ```bash
-go run ./cmd/tracker recommend favorites
-go run ./cmd/tracker recommend favorites --limit 15
+tracker recommend favorites
+tracker recommend favorites --limit 15
 ```
 
 It ranks allowlisted pianists using:
@@ -441,24 +546,24 @@ export KIMI_API_KEY=...
 Run:
 
 ```bash
-go run ./cmd/tracker recommend pianists
-go run ./cmd/tracker recommend pianists --limit 5
+tracker recommend pianists
+tracker recommend pianists --limit 5
 ```
 
 Examples:
 
 ```bash
-LLM_PROFILE=openai go run ./cmd/tracker recommend pianists
-LLM_PROFILE=codex go run ./cmd/tracker recommend pianists
-LLM_PROFILE=codex go run ./cmd/tracker recommend summary
-LLM_PROFILE=codex LLM_MODEL=gpt-5.4 go run ./cmd/tracker recommend pianists
-LLM_PROFILE=anthropic go run ./cmd/tracker recommend pianists
-LLM_PROFILE=claude_cli go run ./cmd/tracker recommend pianists
-LLM_PROFILE=claude_cli LLM_MODEL=opus go run ./cmd/tracker recommend pianists
-LLM_PROFILE=google LLM_MODEL=gemini-3.1-pro-preview go run ./cmd/tracker recommend pianists
-LLM_PROFILE=ollama LLM_PROVIDER=openai_compat LLM_MODEL=qwen2.5:latest LLM_BASE_URL=http://localhost:11434/v1 go run ./cmd/tracker recommend pianists
-LLM_PROFILE=deepseek go run ./cmd/tracker recommend pianists
-LLM_PROFILE=kimi go run ./cmd/tracker recommend pianists
+LLM_PROFILE=openai tracker recommend pianists
+LLM_PROFILE=codex tracker recommend pianists
+LLM_PROFILE=codex tracker recommend summary
+LLM_PROFILE=codex LLM_MODEL=gpt-5.4 tracker recommend pianists
+LLM_PROFILE=anthropic tracker recommend pianists
+LLM_PROFILE=claude_cli tracker recommend pianists
+LLM_PROFILE=claude_cli LLM_MODEL=opus tracker recommend pianists
+LLM_PROFILE=google LLM_MODEL=gemini-3.1-pro-preview tracker recommend pianists
+LLM_PROFILE=ollama LLM_PROVIDER=openai_compat LLM_MODEL=qwen2.5:latest LLM_BASE_URL=http://localhost:11434/v1 tracker recommend pianists
+LLM_PROFILE=deepseek tracker recommend pianists
+LLM_PROFILE=kimi tracker recommend pianists
 ```
 
 `LLM_*` env vars override profile settings. `LLM_PROFILE` selects a profile that
@@ -522,20 +627,87 @@ tracker spotify
 tracker sync
 tracker tui
 tracker version
+tracker web
 ```
 
-## Development Notes
+## Development
 
-- All DB access goes through `sqlc`-generated queries in `internal/db/`
-- The TUI keeps DB writes and network calls off the Bubble Tea `Update` loop by using `tea.Cmd`
-- Track artist lists are stored as JSON strings in SQLite and decoded in Go for filtering and recommendation logic
+```bash
+npm install
+npm run build        # dist/tracker.js: runs on Node >= 24 or Bun
+npm run build:bin    # dist/tracker: single-file Bun executable (needs bun)
+make check           # typecheck, formatting, and tests
+npx vitest bench --run src/tui   # TUI benchmarks
+node scripts/bench-web/bench.mjs # web UI benchmarks (headless Chromium; see its README)
+```
 
-## Project Structure
+`TRACKER_VERSION`, `TRACKER_COMMIT` and `TRACKER_BUILD_DATE` override the
+build metadata the build script otherwise reads from git. `TRACKER_MINIFY=0`
+keeps the bundle readable for CPU profiles.
 
-- `cmd/tracker/`: application entrypoint
-- `internal/cli/`: Cobra commands
-- `internal/tui/`: Bubble Tea models and rendering
-- `internal/db/`: schema, queries, and generated DB code
-- `internal/spotify/`: Spotify auth and client integration
-- `internal/recommend/`: favorite-pianist and taste-summary logic
-- `internal/llm/`: provider-agnostic recommendation layer
+`scripts/tracker-sandbox [args...]` runs `tracker` against a copy of your
+config and database (`scripts/tracker-sandbox reset` refreshes the copy), so
+experiments never touch your real data.
+
+| Directory       | Notes                                                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/core`      | `node:sqlite` (built into Node and Bun, so no native modules). The SQL lives in `src/core/sql`, in sqlc's annotated format. Configs round-trip byte for byte, token expiry included. |
+| `src/spotify`   | OAuth and Web API over `fetch`. The sync checkpoint is a bigint of nanoseconds, parsed without going through `Date`.                                                                 |
+| `src/recommend` | Go-exact `math.Log1p`, emulated fused multiply-add (Go fuses on arm64), `%.2f` rounding, and `json.Unmarshal` semantics.                                                             |
+| `src/llm`       | Prompts and request bodies are checked against captured Go output.                                                                                                                   |
+| `src/app`       | State machine, presenter, and React hook used by both the TUI and the web UI.                                                                                                        |
+| `src/tui`       | A pure reducer plus Ink rendering. Frames match Go's goldens character for character.                                                                                                |
+| `src/web`       | `tracker web`: a local HTTP server (`server/`) and the React DOM client (`client/`), bundled into the binary.                                                                        |
+| `src/cli`       | commander. stdout, errors and exit codes match Go. Ink and React are only loaded by commands that draw.                                                                              |
+
+Notes:
+
+- Every SQL statement lives once in `src/core/sql/query.sql` and is looked
+  up by its `-- name:` annotation; the schema is `src/core/sql/schema.sql`.
+- The TUI and the web UI share one state machine (`src/app/model.ts`). It
+  never does I/O itself: database reads, syncs, and rating writes are
+  commands that run asynchronously and report back as messages.
+- Track artist lists are stored as JSON strings in SQLite and decoded for
+  filtering and recommendation logic.
+
+## Performance
+
+Measured on an Apple Silicon Mac against a copy of a real database (543
+tracks), medians including process start, with the standalone Bun binary:
+`tracker version` about 25 ms, `tracker list recent --limit 50` about 28 ms,
+`tracker tui` to its first list frame about 66 ms, and about 9 ms from a
+TUI keypress to the redraw.
+
+The web UI, measured with `scripts/bench-web` (headless Chromium, requests
+outside 127.0.0.1 blocked; the machine had unrelated background load, so
+these are upper bounds; key latencies are keydown to the DOM change):
+
+|                                  | 543 tracks (real data) | 25,000 tracks (synthetic) |
+| -------------------------------- | ---------------------: | ------------------------: |
+| Server ready                     |                  62 ms |                    122 ms |
+| First row on screen              |                   9 ms |                      9 ms |
+| Cold / warm load to interactive  |             71 / 26 ms |                57 / 28 ms |
+| Cold / warm reload transfer      |            84 / 12 KiB |               85 / 14 KiB |
+| `j` / `G`                        |           1.2 / 1.8 ms |              1.2 / 1.7 ms |
+| Sort / search keystroke          |           6.7 / 6.5 ms |              5.6 / 6.4 ms |
+| Server memory after interactions |                 80 MiB |                   144 MiB |
+| Tab closed to process exit       |                  3.0 s |                     3.0 s |
+
+Moving through the list never leaves the page; sorting and searching are a
+localhost round trip, most of which is the browser scheduling the response.
+
+## History
+
+The tracker was first written in Go (Cobra, Bubble Tea, sqlc) and then
+ported to TypeScript, which replaced it. The port kept the same config file,
+database, and paths, and its output matched the Go build byte for byte for
+every read-only command, argument error, and TUI screen checked. Known
+differences from the Go build:
+
+- Help layout follows commander, not cobra. There is no `completion` subcommand.
+- Spotify API errors include the HTTP status, and requests time out after 30 s.
+- When a hand-edited `artists` column holds `null`, re-encoding writes `[]`.
+
+The Go code is kept at the `archive/go` tag. Experimental ports to Rust,
+Swift, Python, and Svelte, and a Go web UI, are kept at the other
+`archive/*` tags.

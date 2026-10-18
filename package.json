@@ -16,7 +16,7 @@
     "test": "vitest run",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "build:bin": "node scripts/build.mjs && bun build dist/tracker.js --compile --minify --outfile dist/tracker"
+    "build:bin": "node scripts/build.mjs && bun build dist/tracker.js --compile --minify --bytecode --format=esm --outfile dist/tracker"
   },
   "dependencies": {
     "cli-truncate": "^6.1.1",

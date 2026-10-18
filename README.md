@@ -635,7 +635,7 @@ tracker web
 ```bash
 npm install
 npm run build        # dist/tracker.js: runs on Node >= 24 or Bun
-npm run build:bin    # dist/tracker: single-file Bun executable (needs bun)
+npm run build:bin    # dist/tracker: single-file Bun executable with precompiled bytecode (needs bun)
 make check           # typecheck, formatting, and tests
 npx vitest bench --run src/tui   # TUI benchmarks
 node scripts/bench-web/bench.mjs # web UI benchmarks (headless Chromium; see its README)

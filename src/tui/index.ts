@@ -8,7 +8,7 @@ export { runTui } from './app';
 export type { Deps } from '../app/model';
 
 import { App, inkOptions } from './app';
-import { FrameView } from './frame';
+import { frameRows } from './grid';
 import { keyMessages } from './keys';
 import { makeModel, newModel, tracksLoadedMsg, update } from '../app/model';
 import { footerView, layout, view, visibleTracks } from './view';
@@ -16,8 +16,8 @@ import { footerView, layout, view, visibleTracks } from './view';
 /** Not part of the CLI contract: hooks for tests and benchmarks. */
 export const internals = {
   App,
-  FrameView,
   footerView,
+  frameRows,
   inkOptions,
   keyMessages,
   layout,

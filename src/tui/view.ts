@@ -1,8 +1,7 @@
 /**
  * Rendering, part one: `view(model)` builds a frame description (rows of
- * styled spans plus the bordered panes) that the Ink components in
- * `frame.tsx` draw. Keeping it pure lets tests inspect layout without a
- * terminal. The geometry follows the Go Lip Gloss layout cell for cell.
+ * styled spans plus the bordered panes) that `grid.ts` lays out on terminal
+ * cells. Keeping it pure lets tests inspect layout without a terminal. The geometry follows the Go Lip Gloss layout cell for cell.
  */
 import type { ListRow, Model } from '../app/model';
 import {
@@ -103,7 +102,7 @@ export interface Body {
   readonly height: number;
   /**
    * Whether the panes overflow the box. Only very small windows need
-   * clipping, and skipping it spares Ink a slice of every line.
+   * clipping.
    */
   readonly clipped: boolean;
 }

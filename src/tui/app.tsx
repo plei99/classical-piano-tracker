@@ -1,25 +1,24 @@
 /**
  * The Ink program: the shared `useTracker` hook owns the model and runs its
- * commands; this file feeds it keys, pastes, and resizes and draws frames
- * on the character grid. Nothing here blocks a render on I/O.
+ * commands; Ink feeds it keys, pastes, and resizes and owns the terminal
+ * (raw mode, the alternate screen, restoring both on exit). Frames are
+ * drawn by `Screen`, which rewrites only the rows a message changed: laying
+ * every pane and span out as Ink boxes cost several times more per
+ * keypress. Nothing here blocks a render on I/O.
  */
-import { render, useApp, useInput, usePaste, useWindowSize, type RenderOptions } from 'ink';
-import { useEffect, useMemo } from 'react';
+import { render, useApp, useInput, usePaste, useStdout, useWindowSize, type RenderOptions } from 'ink';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 
-import { FrameView } from './frame';
+import { frameRows } from './grid';
 import { keyMessages } from './keys';
 import type { Deps, Model } from '../app/model';
 import { useTracker } from '../app/useTracker';
+import { Screen } from './screen';
 import { view } from './view';
 
-/**
- * Ink's default 30 fps cap adds ~20 ms between a keypress and its frame; a
- * high cap removes that wait. Incremental rendering rewrites only changed
- * lines (~4 KB per keypress instead of ~7 KB at 160x48). Ctrl+C is a key
- * the model handles, as in Go.
- */
+/** Ink draws nothing itself, so only the terminal handling options matter. Ctrl+C is a key the model handles, as in Go. */
 export function inkOptions(): RenderOptions {
-  return { alternateScreen: true, exitOnCtrlC: false, maxFps: 1000, incrementalRendering: true };
+  return { alternateScreen: true, exitOnCtrlC: false };
 }
 
 export interface AppProps {
@@ -30,9 +29,9 @@ export interface AppProps {
 
 export function App({ deps, initialModel }: AppProps) {
   const { exit } = useApp();
-  // Ink's own measure (it follows stdout 'resize' and falls back the same
-  // way Ink's layout does when the stream reports no size), so the model
-  // always lays out for the width Ink draws into.
+  const { stdout } = useStdout();
+  // Ink's own measure (it follows stdout 'resize'), so the model always lays
+  // out for the window the frame is drawn into.
   const { columns, rows } = useWindowSize();
   const { model, dispatch } = useTracker(deps, {
     ...(initialModel !== undefined && { initialModel }),
@@ -54,8 +53,19 @@ export function App({ deps, initialModel }: AppProps) {
   // Enables bracketed paste, so a paste arrives whole instead of as keys.
   usePaste((text) => dispatch({ type: 'paste', text }));
 
+  const screen = useMemo(() => new Screen(stdout), [stdout]);
+  const drawnSize = useRef('');
   const frame = useMemo(() => view(model), [model]);
-  return <FrameView frame={frame} />;
+  useLayoutEffect(() => {
+    // A resized window may have moved or reflowed what was drawn: repaint it all.
+    const size = `${columns}x${rows}`;
+    if (drawnSize.current !== size) {
+      drawnSize.current = size;
+      screen.invalidate();
+    }
+    screen.draw(frameRows(frame, columns));
+  }, [screen, frame, columns, rows]);
+  return null;
 }
 
 /** Takes over the terminal (alternate screen, raw input) until the user quits. */

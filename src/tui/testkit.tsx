@@ -1,15 +1,15 @@
 /**
  * Helpers shared by the TUI tests and benchmarks: key messages, Go golden
- * fixtures, and rendering a model through Ink to plain text.
+ * fixtures, and rendering a model to plain text.
  */
 import { EventEmitter } from 'node:events';
 import { stripVTControlCharacters } from 'node:util';
 
-import { render, renderToString, type Instance } from 'ink';
+import { render, type Instance } from 'ink';
 import type { ReactNode } from 'react';
 
 import type { Rating, Track } from '../core/model';
-import { FrameView } from './frame';
+import { frameRows } from './grid';
 import { makeModel, tracksLoadedMsg, update, type KeyMsg, type Model, type Msg } from '../app/model';
 import { view } from './view';
 
@@ -43,12 +43,10 @@ export function typeText(m: Model, text: string): Model {
   return m;
 }
 
-/** Renders the model with Ink at its window width, as plain right-trimmed text. */
+/** Renders the model at its window width, as plain right-trimmed text. */
 export function renderText(m: Model): string {
-  const output = renderToString(<FrameView frame={view(m)} />, { columns: m.width > 0 ? m.width : 100 });
-  return stripVTControlCharacters(output)
-    .split('\n')
-    .map((line) => line.trimEnd())
+  return frameRows(view(m), m.width > 0 ? m.width : 100)
+    .map((row) => stripVTControlCharacters(row).trimEnd())
     .join('\n');
 }
 
@@ -118,10 +116,17 @@ export function benchRatings(tracks: readonly Track[]): Rating[] {
     }));
 }
 
-/** A terminal-sized stdout that records what Ink writes. */
+/**
+ * A terminal-sized stdout that records what is written and keeps the screen
+ * it draws: the cursor moves, line and screen clears, and text that the TUI's
+ * `Screen` writes (styles and other escapes are dropped).
+ */
 export class FakeStdout extends EventEmitter {
   readonly isTTY = true;
   readonly writes: string[] = [];
+  private readonly screen: string[] = [];
+  private row = 0;
+  private column = 0;
 
   constructor(
     public columns: number,
@@ -132,21 +137,34 @@ export class FakeStdout extends EventEmitter {
 
   write = (chunk: string): boolean => {
     this.writes.push(chunk);
+    // CSI sequences (parameters, then a final letter) and plain text between them.
+    for (const [, params, final, text] of chunk.matchAll(/\u001B\[([\d;?]*)([A-Za-z])|([^\u001B]+)/g)) {
+      if (text !== undefined) {
+        this.print(text);
+      } else if (final === 'H') {
+        const [row = 1, column = 1] = (params ?? '').split(';').map((value) => Number(value || 1));
+        this.row = row - 1;
+        this.column = column - 1;
+      } else if (final === 'K' && params === '2') {
+        this.screen[this.row] = '';
+      } else if (final === 'J' && params === '2') {
+        this.screen.length = 0;
+      }
+    }
     return true;
   };
 
-  /** The latest frame Ink wrote, as plain right-trimmed text (mode escapes are skipped). */
+  private print(text: string): void {
+    const line = (this.screen[this.row] ?? '').padEnd(this.column);
+    this.screen[this.row] = line.slice(0, this.column) + text + line.slice(this.column + text.length);
+    this.column += text.length;
+  }
+
+  /** The screen as plain right-trimmed text, without trailing blank rows. */
   lastFrame(): string {
-    for (let index = this.writes.length - 1; index >= 0; index--) {
-      const text = stripVTControlCharacters(this.writes[index] ?? '');
-      if (text.trim() !== '') {
-        return text
-          .split('\n')
-          .map((line) => line.trimEnd())
-          .join('\n');
-      }
-    }
-    return '';
+    return Array.from(this.screen, (line) => (line ?? '').trimEnd())
+      .join('\n')
+      .replace(/\n+$/, '');
   }
 
   resize(columns: number, rows: number): void {

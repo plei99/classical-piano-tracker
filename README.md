@@ -12,7 +12,8 @@ Based on the author's testing so far, `gpt-5.4` seems to produce the best recomm
 - TypeScript, bundled with esbuild and compiled to a single binary with Bun
   (the bundle also runs on Node 24+)
 - commander for the CLI
-- React, drawn with Ink in the terminal and with React DOM in the browser
+- React, driving a character-grid renderer (with Ink for input) in the
+  terminal and React DOM in the browser
 - SQLite via the runtime's built-in `node:sqlite`
 - Spotify's Web API over `fetch`
 
@@ -380,7 +381,8 @@ adds:
 The TUI and the web UI share their state machine (`src/app/model.ts`),
 their wording and layout decisions (`src/app/presenter.ts`), and the React
 hook that runs them (`src/app/useTracker.ts`). Only the drawing differs:
-Ink on a character grid in `src/tui`, React DOM with CSS in
+a character grid in `src/tui` (Ink handles input and the terminal; the
+TUI writes only the rows that changed), React DOM with CSS in
 `src/web/client`.
 
 ### How the work is split
@@ -656,7 +658,7 @@ experiments never touch your real data.
 | `src/recommend` | Go-exact `math.Log1p`, emulated fused multiply-add (Go fuses on arm64), `%.2f` rounding, and `json.Unmarshal` semantics.                                                             |
 | `src/llm`       | Prompts and request bodies are checked against captured Go output.                                                                                                                   |
 | `src/app`       | State machine, presenter, and React hook used by both the TUI and the web UI.                                                                                                        |
-| `src/tui`       | A pure reducer plus Ink rendering. Frames match Go's goldens character for character.                                                                                                |
+| `src/tui`       | A pure reducer plus a cell-grid renderer that rewrites only changed rows. Frames match Go's goldens character for character.                                                         |
 | `src/web`       | `tracker web`: a local HTTP server (`server/`) and the React DOM client (`client/`), bundled into the binary.                                                                        |
 | `src/cli`       | commander. stdout, errors and exit codes match Go. Ink and React are only loaded by commands that draw.                                                                              |
 

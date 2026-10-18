@@ -1,4 +1,4 @@
-/** The Ink program end to end, key translation, styles, and degenerate window sizes. */
+/** The TUI program end to end, key translation, styles, and degenerate window sizes. */
 import type { Key } from 'ink';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -129,7 +129,7 @@ describe('App', () => {
     const frame = () => h.stdout.lastFrame();
     expect(frame()).toContain('Loading local tracks...');
 
-    // The live Ink pipeline draws exactly what renderToString does.
+    // The live screen shows exactly what renderText draws.
     await vi.waitFor(() => expect(frame()).toContain('5 loaded · sort: recent'));
     expect(frame().replace(/\n+$/, '')).toBe(renderText(goldenModel(120, 28, 5, false)).replace(/\n+$/, ''));
 

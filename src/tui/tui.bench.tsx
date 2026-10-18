@@ -3,20 +3,21 @@
  * the `archive/go` tag). Run with
  * `npx vitest bench --run src/tui`.
  *
- * "Frame" benchmarks include Ink's full render of a 160x48 window: React
- * reconciliation, Yoga layout, and building the output string (Ink's debug
- * mode, which writes every frame synchronously to a fake stdout).
+ * "Frame" benchmarks include drawing a 160x48 window: laying the frame out
+ * on the cell grid and writing the rows that changed to a stdout that
+ * discards them.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, test } from 'vitest';
+import { test } from 'vitest';
 
 import { Db } from '../core/db';
-import { FrameView } from './frame';
 import { newModel, tracksLoadedMsg, update, type Model } from '../app/model';
-import { benchRatings, benchTracks, mountInk, textKey, type InkHarness } from './testkit';
+import { frameRows } from './grid';
+import { Screen } from './screen';
+import { benchRatings, benchTracks, textKey } from './testkit';
 import { view } from './view';
 
 /**
@@ -36,22 +37,16 @@ function benchModel(n: number): Model {
   return update(m, tracksLoadedMsg(tracks, benchRatings(tracks)))[0];
 }
 
-const harnesses: InkHarness[] = [];
-afterAll(() => {
-  for (const harness of harnesses) {
-    harness.instance.unmount();
-  }
-});
-
-/** A live Ink instance showing `m`, whose `show` re-renders it with another model. */
-function mountFrame(m: Model): { show: (next: Model, key?: number) => void; reset: () => void } {
-  const harness = mountInk(<FrameView frame={view(m)} />, WIDTH, HEIGHT);
-  harnesses.push(harness);
+/** A screen showing `m`, whose `show` draws another model (all of it with `repaint`). */
+function mountFrame(m: Model): { show: (next: Model, repaint?: boolean) => void } {
+  const screen = new Screen({ write: () => true, isTTY: true });
+  screen.draw(frameRows(view(m), WIDTH));
   return {
-    show: (next, key) => harness.instance.rerender(<FrameView key={key} frame={view(next)} />),
-    // Frames are recorded; drop them so long runs don't accumulate.
-    reset: () => {
-      harness.stdout.writes.length = 0;
+    show: (next, repaint = false) => {
+      if (repaint) {
+        screen.invalidate();
+      }
+      screen.draw(frameRows(view(next), WIDTH));
     },
   };
 }
@@ -73,16 +68,14 @@ test('TracksLoaded', async ({ bench }) => {
 test('View', async ({ bench }) => {
   const registrations = sizes.flatMap((n) => {
     const m = benchModel(n);
-    const warm = mountFrame(m);
-    const cold = mountFrame(m);
-    let key = 0;
+    const frame = mountFrame(m);
     return [
       // Re-rendering an unchanged model: every row is rebuilt and compared,
-      // then Ink lays out and draws the frame.
-      bench(`n=${n} re-render`, { beforeEach: warm.reset }, () => warm.show(m)),
-      // A fresh tree each time, closest to Go's View, which builds the whole
+      // and none is written.
+      bench(`n=${n} re-render`, () => frame.show(m)),
+      // Every row written, closest to Go's View, which builds the whole
       // frame string from scratch.
-      bench(`n=${n} remount`, { beforeEach: cold.reset }, () => cold.show(m, ++key)),
+      bench(`n=${n} repaint`, () => frame.show(m, true)),
     ];
   });
   await bench.compare(...registrations, runOptions);
@@ -95,10 +88,7 @@ test('MoveDownFrame', async ({ bench }) => {
     const m = benchModel(n);
     const frame = mountFrame(m);
     const key = textKey('j');
-    const before = () => {
-      frame.reset();
-      frame.show(m);
-    };
+    const before = () => frame.show(m);
     return bench(`n=${n}`, { beforeEach: before }, () => {
       const [next, cmd] = update(m, key);
       if (cmd !== null) {
@@ -119,10 +109,7 @@ test('SearchKeystrokeFrame', async ({ bench }) => {
     }
     const frame = mountFrame(m);
     const key = textKey('o');
-    const before = () => {
-      frame.reset();
-      frame.show(m);
-    };
+    const before = () => frame.show(m);
     return bench(`n=${n}`, { beforeEach: before }, () => {
       frame.show(update(m, key)[0]);
     });
@@ -135,7 +122,7 @@ test('SortCycleFrame', async ({ bench }) => {
     let m = benchModel(n);
     const frame = mountFrame(m);
     const key = textKey('o');
-    return bench(`n=${n}`, { beforeEach: frame.reset }, () => {
+    return bench(`n=${n}`, () => {
       m = update(m, key)[0];
       frame.show(m);
     });

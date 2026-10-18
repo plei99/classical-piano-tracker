@@ -19,6 +19,7 @@
     "build:bin": "node scripts/build.mjs && bun build dist/tracker.js --compile --minify --bytecode --format=esm --outfile dist/tracker"
   },
   "dependencies": {
+    "chalk": "^5.6.2",
     "cli-truncate": "^6.1.1",
     "commander": "^15.0.0",
     "ink": "^7.1.1",

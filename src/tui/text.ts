@@ -5,7 +5,7 @@
  */
 import stringWidth from 'string-width';
 
-/** Text attributes the TUI uses. Lip Gloss "faint" is Ink's `dimColor`. */
+/** Text attributes the TUI uses. Lip Gloss "faint" is the terminal's dim attribute. */
 export interface Style {
   readonly bold?: boolean;
   readonly dim?: boolean;

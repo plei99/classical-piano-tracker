@@ -8,7 +8,7 @@ This project is a CLI, terminal UI, and local web UI for tracking Spotify classi
 
 - **Runtime and build**: Node 24+ or Bun. `scripts/build.mjs` bundles with esbuild into `dist/tracker.js`; `npm run build:bin` compiles a standalone Bun binary, `dist/tracker`.
 - **CLI**: `commander`
-- **TUI**: React drawn with `ink`
+- **TUI**: React state with `ink` for input and the terminal; frames are drawn on a cell grid by `src/tui/grid.ts` and `src/tui/screen.ts`
 - **Web UI**: React DOM in the browser, server-rendered with `react-dom/server` by a local `node:http` server
 - **Database**: SQLite via the runtime's built-in `node:sqlite` (no native modules, no ORMs).
 - **DB Code**: write raw SQL in `src/core/sql/query.sql` (each statement under a `-- name:` annotation, sqlc style) and `src/core/sql/schema.sql`; `src/core/db.ts` looks statements up by name. Do not add an ORM or query builder.
@@ -19,7 +19,7 @@ Maintain the following layout:
 
 - `src/cli/` (commander commands, wired up in `src/cli/index.ts`)
 - `src/app/` (the state machine, presenter, and React hook shared by the TUI and the web UI)
-- `src/tui/` (Ink rendering of the shared model)
+- `src/tui/` (terminal rendering of the shared model)
 - `src/web/` (`tracker web`: `server/` and the React DOM `client/`; the HTTP contract is `api.ts`)
 - `src/core/` (config, paths, SQL files, and DB access)
 - `src/spotify/` (API client, OAuth flow, and sync)

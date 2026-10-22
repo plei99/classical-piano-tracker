@@ -7,15 +7,11 @@
 !.env.example
 !**/.env.example
 
-# Node
-node_modules/
-dist/
-coverage/
-*.tsbuildinfo
-npm-debug.log*
+# Cargo build output
+/target/
 
-# Bun's temporary files from `bun build --compile`
-.*.bun-build
+# Node (scripts/bench-web)
+node_modules/
 
 # Local data
 *.sqlite3

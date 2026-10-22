@@ -6,7 +6,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
-export const SCHEMA_PATH = new URL('../../../internal/db/schema.sql', import.meta.url).pathname;
+export const SCHEMA_PATH = new URL('../../../crates/tracker-core/sql/schema.sql', import.meta.url).pathname;
 const FILES = ['config.json', 'tracker.db', 'artwork-cache.json'];
 
 export function sandboxPath() {

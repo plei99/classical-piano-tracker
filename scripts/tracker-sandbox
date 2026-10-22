@@ -7,7 +7,7 @@
 #   tracker-sandbox path        print the sandbox directory
 #
 # The first run creates the sandbox automatically. TRACKER_BIN picks the
-# binary (default: `tracker` on PATH), e.g. TRACKER_BIN=dist/tracker.
+# binary (default: `tracker` on PATH), e.g. TRACKER_BIN=target/release/tracker.
 set -euo pipefail
 
 if [ "$(uname -s)" = Darwin ]; then

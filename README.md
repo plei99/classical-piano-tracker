@@ -1,6 +1,6 @@
 # Classical Piano Tracker
 
-A command-line tool, terminal UI, and local web UI for tracking, filtering, rating, and exploring your classical piano listening history from Spotify. Written in TypeScript.
+A command-line tool, terminal UI, and local web UI for tracking, filtering, rating, and exploring your classical piano listening history from Spotify. Written in Rust.
 
 ## Warning
 
@@ -9,13 +9,13 @@ Based on the author's testing so far, `gpt-5.4` seems to produce the best recomm
 
 ## Stack
 
-- TypeScript, bundled with esbuild and compiled to a single binary with Bun
-  (the bundle also runs on Node 24+)
-- commander for the CLI
-- React, driving a character-grid renderer (with Ink for input) in the
-  terminal and React DOM in the browser
-- SQLite via the runtime's built-in `node:sqlite`
-- Spotify's Web API over `fetch`
+- Rust, as one Cargo workspace that builds a single `tracker` binary
+- clap for the CLI
+- ratatui and crossterm for the terminal UI
+- axum for the local web server, and Leptos for the browser UI (rendered on
+  the server, then hydrated as WebAssembly)
+- SQLite via rusqlite (SQLite is compiled in)
+- Spotify's Web API over ureq
 
 ## What It Does
 
@@ -29,7 +29,8 @@ Based on the author's testing so far, `gpt-5.4` seems to produce the best recomm
 
 ## Requirements
 
-- Node 24 or later and npm, plus [Bun](https://bun.sh) to build the standalone binary
+- a Rust toolchain (edition 2024) with the `wasm32-unknown-unknown` target, and the
+  `wasm-bindgen` CLI for the web UI (see [Development](#development))
 - a Spotify developer application with a client ID and client secret
 - a Spotify account with listening history to sync
 - optionally, an LLM API key, a local Ollama model, or a signed-in Codex/Claude Code CLI for taste summaries and pianist recommendations
@@ -57,7 +58,7 @@ tracker --config /custom/config.json --db /custom/tracker.db ...
 ## Installation
 
 ```bash
-make build     # dist/tracker: a standalone binary (installs npm dependencies first)
+make build     # target/release/tracker
 make install
 ```
 
@@ -87,9 +88,7 @@ make install BINDIR=/usr/local/bin
 If you do not want to install it globally, you can still run it from the repo:
 
 ```bash
-npm install
-npm run build              # dist/tracker.js, runs on Node 24+ or Bun
-node dist/tracker.js --help
+cargo run --release -- --help
 ```
 
 ## First-Time Setup
@@ -378,50 +377,50 @@ adds:
   the server reads to render the page in that theme (no flash, no boot
   script).
 
-The TUI and the web UI share their state machine (`src/app/model.ts`),
-their wording and layout decisions (`src/app/presenter.ts`), and the React
-hook that runs them (`src/app/useTracker.ts`). Only the drawing differs:
-a character grid in `src/tui` (Ink handles input and the terminal; the
-TUI writes only the rows that changed), React DOM with CSS in
-`src/web/client`.
+The TUI and the web UI share their state machine and their wording and
+layout decisions (`crates/tracker-app`: `model.rs` and `presenter.rs`).
+Only the drawing differs: ratatui in `crates/tracker-tui`, Leptos
+components with CSS in `crates/tracker-web-client`.
 
 ### How the work is split
 
 The web UI is a hybrid: the server owns the library and the browser owns
 the UI state.
 
-- **The server** (`src/web/server`) reads tracks and ratings once, at
-  startup and again on reload, after a sync, and when a rating is saved
-  (each bumps the library's `version`). It keeps the list in all four sort
-  orders and answers windowed queries with the TUI's own sort and search
-  code (`LocalTrackList` in `src/app/list.ts`), so both front ends always
-  agree. `GET /` is rendered on the server with `react-dom/server`: the
-  first screen (newest first, first track selected, the first 100 rows),
+- **The server** (`crates/tracker-web`, axum on a current-thread tokio
+  runtime) reads tracks and ratings once, at startup and again on reload,
+  after a sync, and when a rating is saved (each bumps the library's
+  `version`). It keeps the list in all four sort orders and answers windowed
+  queries with the TUI's own sort and search functions (`sort_by_mode` and
+  `search_needle` in `tracker-app`), so both front ends always agree. The
+  blocking code (SQLite, the Spotify client, sync) runs on tokio's blocking
+  pool. `GET /` renders the first screen (newest first, first track
+  selected, the first 100 rows) with the client's own Leptos components,
   plus the data it was rendered from in
   `<script type="application/json" id="tracker-initial">`. Reloading the
   page shows the server's copy; r re-reads the database (say, after a
   `tracker sync` in another terminal).
-- **The browser** hydrates that page (`hydrateRoot`) and runs the TUI's
-  model over a `RemoteTrackList` (`src/web/client/remoteList.ts`): a
-  sparse cache of rows for one sort, query, and library version. Moving
-  between loaded rows never touches the network. The list pane fetches
-  100-row chunks ahead of the selection and the scroll position (two
-  screens each way), so holding j/k or scrolling does not reach an
-  unloaded row in practice; one that has not arrived yet is drawn as a
-  placeholder of the same height. g/G jump by index and fetch the window
-  they land in.
-- **The model** works over a small list interface (count, row lookup,
-  index of a track; `TrackList` in `src/app/list.ts`). The TUI's in-memory
-  list re-sorts and filters synchronously, exactly as before. A remote list
-  turns re-sorting, searching, and reloading into `/api/view` requests
-  (`around` keeps the selected track selected, as the TUI does); answers to
-  superseded requests are dropped, and the counts and sort label describe
-  the rows on screen until the new ones arrive. A saved rating shows at
-  once; rows that later come back from a newer library version make the
-  page refetch around the selection, keeping the old rows on screen until
-  then.
+- **The browser** (`crates/tracker-web-client`, compiled to wasm32) hydrates
+  that page and runs the TUI's model over `RemoteTracks`
+  (`crates/tracker-app/src/remote.rs`): a sparse cache of rows for one
+  sort, query, and library version. Moving between loaded rows never
+  touches the network. The list pane fetches 100-row chunks ahead of the
+  selection and the scroll position (two screens each way), so holding j/k
+  or scrolling does not reach an unloaded row in practice; one that has
+  not arrived yet is drawn as a placeholder of the same height. g/G jump by
+  index and fetch the window they land in.
+- **The model** (`BrowserModel<L: TrackList>`) works over a small list
+  interface (count, row lookup, index of a track; `crates/tracker-app/src/list.rs`).
+  The TUI's in-memory list (`LocalTracks`) re-sorts and filters
+  synchronously. A remote list turns re-sorting, searching, and reloading
+  into `/api/view` requests (`around` keeps the selected track selected, as
+  the TUI does); answers to superseded requests are dropped, and the counts
+  and sort label describe the rows on screen until the new ones arrive. A
+  saved rating shows at once; rows that later come back from a newer
+  library version make the page refetch around the selection, keeping the
+  old rows on screen until then.
 
-The API (types and details in `src/web/api.ts`):
+The API (types and details in `crates/tracker-app/src/api.rs`):
 
 - `GET /`: the server-rendered page.
 - `GET /api/view?sort=&q=&offset=&limit=[&around=]`: a window of the list,
@@ -434,19 +433,19 @@ The API (types and details in `src/web/api.ts`):
 - `GET /api/artwork?ids=`: album art for up to 50 tracks.
 - `GET /api/presence?token=`: the tab's presence stream.
 
-Responses are compressed when the browser allows: the script and
-stylesheet are compressed with brotli and gzip at build time
-(`scripts/build.mjs`) and embedded that way, and JSON and HTML over 1 KiB
-are compressed per response. The presence stream never is. The page
-renderer (`src/web/server/page.tsx` with React's server renderer) is
-embedded as a separate chunk that only `tracker web` evaluates, so it adds
-nothing to the startup of other commands.
+Responses are compressed when the browser allows: the WebAssembly, its
+JavaScript glue, and the stylesheet are compressed with brotli and gzip at
+build time (`crates/tracker-web/build.rs`) and embedded that way, and JSON
+and HTML over 1 KiB are compressed per response. The presence stream never
+is.
 
 The server listens on 127.0.0.1 only and rejects other Host headers. Every
 write, and the presence stream, needs a per-launch token embedded in the
 page, so another site cannot keep the server running. Spotify's player
-requires `'unsafe-eval'` in the page's script policy; only this app's
-bundle and Spotify's scripts can run.
+requires `'unsafe-eval'` in the page's script policy (it also covers
+compiling the WebAssembly); only this app's scripts and Spotify's can run.
+The page has no inline scripts: a two-line boot module calls the
+wasm-bindgen initializer.
 
 ## Recommendations
 
@@ -635,50 +634,81 @@ tracker web
 ## Development
 
 ```bash
-npm install
-npm run build        # dist/tracker.js: runs on Node >= 24 or Bun
-npm run build:bin    # dist/tracker: single-file Bun executable with precompiled bytecode (needs bun)
-make check           # typecheck, formatting, and tests
-npx vitest bench --run src/tui   # TUI benchmarks
-node scripts/bench-web/bench.mjs # web UI benchmarks (headless Chromium; see its README)
+make build                    # cargo build --release: target/release/tracker
+make check                    # rustfmt, clippy (-D warnings), and tests
+cargo test --workspace
+cargo bench -p tracker-tui    # TUI benchmarks (criterion)
+node scripts/bench-web/bench.mjs   # web UI benchmarks (headless Chromium; see its README)
 ```
 
 `TRACKER_VERSION`, `TRACKER_COMMIT` and `TRACKER_BUILD_DATE` override the
-build metadata the build script otherwise reads from git. `TRACKER_MINIFY=0`
-keeps the bundle readable for CPU profiles.
+build metadata the build script otherwise reads from git.
 
 `scripts/tracker-sandbox [args...]` runs `tracker` against a copy of your
 config and database (`scripts/tracker-sandbox reset` refreshes the copy), so
-experiments never touch your real data.
+experiments never touch your real data. `TRACKER_BIN=target/release/tracker`
+runs a fresh build.
 
-| Directory       | Notes                                                                                                                                                                                |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/core`      | `node:sqlite` (built into Node and Bun, so no native modules). The SQL lives in `src/core/sql`, in sqlc's annotated format. Configs round-trip byte for byte, token expiry included. |
-| `src/spotify`   | OAuth and Web API over `fetch`. The sync checkpoint is a bigint of nanoseconds, parsed without going through `Date`.                                                                 |
-| `src/recommend` | Go-exact `math.Log1p`, emulated fused multiply-add (Go fuses on arm64), `%.2f` rounding, and `json.Unmarshal` semantics.                                                             |
-| `src/llm`       | Prompts and request bodies are checked against captured Go output.                                                                                                                   |
-| `src/app`       | State machine, presenter, and React hook used by both the TUI and the web UI.                                                                                                        |
-| `src/tui`       | A pure reducer plus a cell-grid renderer that rewrites only changed rows. Frames match Go's goldens character for character.                                                         |
-| `src/web`       | `tracker web`: a local HTTP server (`server/`) and the React DOM client (`client/`), bundled into the binary.                                                                        |
-| `src/cli`       | commander. stdout, errors and exit codes match Go. Ink and React are only loaded by commands that draw.                                                                              |
+### Building the web client
+
+`cargo build --release` stays the only command. `tracker-web` depends on the
+client crate natively (with its `ssr` feature) to render the first screen,
+and its build script builds the browser side with a nested `cargo rustc`
+for `wasm32-unknown-unknown` (profile `wasm-release`, into
+`target/web-client`). It then runs `wasm-bindgen --target web` and
+`wasm-opt -Oz`, compresses every asset with gzip and brotli, and embeds the
+originals and the compressed copies. Cargo reruns it only when the client or
+the crates it compiles change. It needs:
+
+- a rustc with the `wasm32-unknown-unknown` target
+  (`rustup target add wasm32-unknown-unknown`). The script uses this build's
+  rustc if it has the target, otherwise a rustup toolchain (same release
+  first), otherwise `TRACKER_WASM_TOOLCHAIN=<toolchain dir>`. Homebrew's
+  `rust` has no wasm std, so with it the script falls back to a rustup
+  toolchain.
+- the `wasm-bindgen` CLI at exactly the version the client pins
+  (`cargo install wasm-bindgen-cli --version 0.2.129`; checked,
+  `WASM_BINDGEN` overrides the path);
+- `wasm-opt` (binaryen), optional; without it the client is embedded about
+  five times larger, with a build warning (`WASM_OPT` overrides the path).
+
+`TRACKER_WEB_CLIENT_DIR=<dir>` skips all of that and embeds an existing
+wasm-bindgen output directory. The client's pure logic (key routing,
+artwork batching, windowing) is tested natively with the rest of the
+workspace.
+
+| Crate               | Notes                                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tracker-core`      | Config, paths, and SQLite (rusqlite). The SQL lives in `sql/`, in sqlc's annotated format. Builds for wasm32 with its default `native` feature off.            |
+| `tracker-spotify`   | OAuth and Web API over blocking `ureq`. The sync checkpoint stays in nanoseconds.                                                                             |
+| `tracker-recommend` | Favorite-pianist scoring; the float math matches the Go build bit for bit.                                                                                    |
+| `tracker-llm`       | LLM providers. Prompts and request JSON match the Go build byte for byte.                                                                                     |
+| `tracker-app`       | State machine, presenter, list abstraction, and the web API contract, shared by the TUI and the web client. Pure; builds for wasm32.                           |
+| `tracker-tui`       | ratatui + crossterm. Frames match Go's goldens character for character. I/O runs on background threads that share one channel with input, so nothing polls. |
+| `tracker-web`       | `tracker web`: the axum server, the album-art service, compression, and the embedded client.                                                                  |
+| `tracker-web-client`| The Leptos client, compiled natively for the server's first render and to wasm32 for the browser.                                                             |
+| `tracker-cli`       | clap; builds the `tracker` binary. stdout, errors and exit codes match Go.                                                                                    |
 
 Notes:
 
-- Every SQL statement lives once in `src/core/sql/query.sql` and is looked
-  up by its `-- name:` annotation; the schema is `src/core/sql/schema.sql`.
-- The TUI and the web UI share one state machine (`src/app/model.ts`). It
-  never does I/O itself: database reads, syncs, and rating writes are
-  commands that run asynchronously and report back as messages.
+- Every SQL statement lives once in `crates/tracker-core/sql/query.sql` and
+  is looked up by its `-- name:` annotation; the schema is
+  `crates/tracker-core/sql/schema.sql`.
+- The TUI and the web UI share one state machine
+  (`crates/tracker-app/src/model.rs`). It never does I/O itself: database
+  reads, syncs, and rating writes are commands (`Cmd`) that `update` returns
+  as data; they run asynchronously and report back as messages.
 - Track artist lists are stored as JSON strings in SQLite and decoded for
   filtering and recommendation logic.
 
 ## Performance
 
 Measured on an Apple Silicon Mac against a copy of a real database (543
-tracks), medians including process start, with the standalone Bun binary:
-`tracker version` about 25 ms, `tracker list recent --limit 50` about 28 ms,
-`tracker tui` to its first list frame about 66 ms, and about 9 ms from a
-TUI keypress to the redraw.
+tracks), medians including process start: `tracker version` about 3 ms,
+`tracker list recent --limit 50` about 4 ms, `tracker recommend profile`
+about 4 ms, `tracker tui` to its first list frame about 12 ms, and under
+1 ms from a TUI keypress to the redraw. The release binary is about 11 MB,
+1.7 MB of which is the embedded web client.
 
 The web UI, measured with `scripts/bench-web` (headless Chromium, requests
 outside 127.0.0.1 blocked; the machine had unrelated background load, so
@@ -686,30 +716,38 @@ these are upper bounds; key latencies are keydown to the DOM change):
 
 |                                  | 543 tracks (real data) | 25,000 tracks (synthetic) |
 | -------------------------------- | ---------------------: | ------------------------: |
-| Server ready                     |                  62 ms |                    122 ms |
+| Server ready                     |                  11 ms |                     64 ms |
 | First row on screen              |                   9 ms |                      9 ms |
-| Cold / warm load to interactive  |             71 / 26 ms |                57 / 28 ms |
-| Cold / warm reload transfer      |            84 / 12 KiB |               85 / 14 KiB |
-| `j` / `G`                        |           1.2 / 1.8 ms |              1.2 / 1.7 ms |
-| Sort / search keystroke          |           6.7 / 6.5 ms |              5.6 / 6.4 ms |
-| Server memory after interactions |                 80 MiB |                   144 MiB |
+| Cold / warm load to interactive  |             79 / 30 ms |                67 / 30 ms |
+| Cold / warm reload transfer      |           302 / 12 KiB |                   304 KiB |
+| `j` / `G`                        |           1.2 / 2.2 ms |              1.3 / 2.2 ms |
+| Sort / search keystroke          |           5.7 / 6.3 ms |           4.9 ms (sort) |
+| Server memory after interactions |                 24 MiB |                    66 MiB |
 | Tab closed to process exit       |                  3.0 s |                     3.0 s |
 
 Moving through the list never leaves the page; sorting and searching are a
 localhost round trip, most of which is the browser scheduling the response.
+A cold load is about 300 KiB on the wire at any library size, 279 KiB of it
+the WebAssembly client.
 
 ## History
 
-The tracker was first written in Go (Cobra, Bubble Tea, sqlc) and then
-ported to TypeScript, which replaced it. The port kept the same config file,
-database, and paths, and its output matched the Go build byte for byte for
-every read-only command, argument error, and TUI screen checked. Known
-differences from the Go build:
+The tracker was first written in Go (Cobra, Bubble Tea, sqlc), then ported
+to TypeScript, which replaced it, and then to Rust, which replaced that.
+Every port kept the same config file, database, paths, and
+`artwork-cache.json`, so the builds can be used interchangeably. The Rust
+build's output matches the Go build byte for byte for every read-only
+command checked, and its TUI screens match Go's goldens. Known differences
+from the Go build:
 
-- Help layout follows commander, not cobra. There is no `completion` subcommand.
+- clap's wording for usage errors (e.g. `unrecognized subcommand`) differs
+  from cobra's. There is no `completion` subcommand.
+- The token expiry is written in UTC rather than the local offset. It is the
+  same instant, and every build reads either form.
 - Spotify API errors include the HTTP status, and requests time out after 30 s.
-- When a hand-edited `artists` column holds `null`, re-encoding writes `[]`.
+- LLM providers have no cancellation; the external CLI providers keep their
+  timeouts.
 
-The Go code is kept at the `archive/go` tag. Experimental ports to Rust,
-Swift, Python, and Svelte, and a Go web UI, are kept at the other
-`archive/*` tags.
+The Go code is kept at the `archive/go` tag and the TypeScript code at
+`archive/ts`. Experimental ports to Swift, Python, and Svelte, a Go web UI,
+and earlier states of the Rust port are kept at the other `archive/*` tags.

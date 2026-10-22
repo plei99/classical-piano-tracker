@@ -1,0 +1,33 @@
+[package]
+name = "tracker-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
+brotli = { version = "8", default-features = false, features = ["std"] }
+flate2 = "1.1.10"
+getrandom = "0.4"
+http-body = "1.1.0"
+http-body-util = "0.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["net", "rt", "sync", "time"] }
+tracker-app = { version = "0.1.0", path = "../tracker-app" }
+tracker-core = { version = "0.1.0", path = "../tracker-core" }
+tracker-spotify = { version = "0.1.0", path = "../tracker-spotify" }
+tracker-web-client = { version = "0.1.0", path = "../tracker-web-client", features = ["ssr"] }
+ureq = "3.4.2"
+url = "2.5.8"
+
+[build-dependencies]
+brotli = { version = "8", default-features = false, features = ["std"] }
+flate2 = "1.1.10"
+
+[dev-dependencies]
+jiff = "0.2.37"
+tempfile = "3.27.0"
+tokio = { version = "1.53.1", features = ["macros"] }
+tracker-spotify = { version = "0.1.0", path = "../tracker-spotify", features = ["test-support"] }

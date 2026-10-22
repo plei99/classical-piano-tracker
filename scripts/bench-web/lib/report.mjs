@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ORDER = ['ts', 'go', 'rs', 'swift'];
-const ARCH = { ts: 'hybrid (React)', go: 'server-driven', rs: 'client (Leptos/WASM)', swift: 'server-driven' };
+const ARCH = { ts: 'hybrid (React)', go: 'server-driven', rs: 'hybrid (Leptos/WASM)', swift: 'server-driven' };
 
 export function pct(values, p) {
   const s = values.filter((x) => typeof x === 'number' && Number.isFinite(x)).sort((a, b) => a - b);

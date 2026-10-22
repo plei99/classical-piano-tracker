@@ -1,0 +1,15 @@
+[package]
+name = "tracker-llm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["raw_value"] }
+tempfile = "3.27.0"
+tracker-core = { version = "0.1.0", path = "../tracker-core" }
+tracker-recommend = { version = "0.1.0", path = "../tracker-recommend" }
+ureq = { version = "3.4.2", features = ["json"] }
+url = "2.5.8"

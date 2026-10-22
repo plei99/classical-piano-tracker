@@ -1,0 +1,17 @@
+[package]
+name = "tracker-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The track browser's state machine and presenter, shared by the terminal UI
+# and the web client, plus the web API contract. Pure: no terminal, threads,
+# database, or network, so it also builds for wasm32.
+
+[dependencies]
+anyhow = "1.0.104"
+jiff = "0.2.37"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tracker-core = { version = "0.1.0", path = "../tracker-core", default-features = false }
+

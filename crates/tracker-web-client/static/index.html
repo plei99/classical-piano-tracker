@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en" data-theme="%TRACKER_THEME%">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="tracker-token" content="%TRACKER_TOKEN%" />
+    <title>Classical Piano Tracker</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+    <link rel="modulepreload" href="/assets/client.js" />
+    <link rel="preload" href="/assets/client_bg.wasm" as="fetch" type="application/wasm" crossorigin />
+  </head>
+  <body>
+    <div id="root"><!--tracker-app--></div>
+    <!--tracker-initial-->
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

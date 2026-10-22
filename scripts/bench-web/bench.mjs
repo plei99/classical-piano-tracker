@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Benchmarks `tracker web` builds. See README.md.
 //
-//   node scripts/bench-web/bench.mjs [--builds ts] [--runs 3] [--datasets real,large]
+//   node scripts/bench-web/bench.mjs [--builds rs] [--runs 3] [--datasets real,large]
 //        [--cold 5] [--j 250] [--note "text"] [--regen]
 import { chromium } from 'playwright-core';
 import { readFileSync, mkdirSync, writeFileSync, rmSync, statSync, existsSync, readdirSync } from 'node:fs';
@@ -18,7 +18,7 @@ import { writeSummary } from './lib/report.mjs';
 const HERE = new URL('.', import.meta.url).pathname;
 const { values: args } = parseArgs({
   options: {
-    builds: { type: 'string', default: 'ts' },
+    builds: { type: 'string', default: 'rs' },
     datasets: { type: 'string', default: 'real,large' },
     runs: { type: 'string', default: '3' },
     cold: { type: 'string', default: '5' },
@@ -35,10 +35,10 @@ const BUILDS = args.builds
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
-/** `tracker-<build>` in --bindir; the `ts` build falls back to the installed `tracker`. */
+/** `tracker-<build>` in --bindir; the `rs` build falls back to the installed `tracker`. */
 function binFor(build) {
   const variant = join(args.bindir, `tracker-${build}`);
-  return build === 'ts' && !existsSync(variant) ? join(args.bindir, 'tracker') : variant;
+  return build === 'rs' && !existsSync(variant) ? join(args.bindir, 'tracker') : variant;
 }
 const DATASETS = args.datasets
   .split(',')

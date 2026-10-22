@@ -1,20 +1,20 @@
 # bench-web
 
-Benchmarks `tracker web`. The default build, `ts`, is the installed
-`tracker` (or `tracker-ts` if present) in `--bindir`. Other builds are named
+Benchmarks `tracker web`. The default build, `rs`, is the installed
+`tracker` (or `tracker-rs` if present) in `--bindir`. Other builds are named
 `tracker-<build>` there, so the harness can still compare against the
-archived Go, Rust, and Swift web UIs (tags `archive/go-web`,
-`archive/rust-web`, `archive/swift-web`) if you build them.
+archived TypeScript, Go, and Swift web UIs (`ts`, `go`, `swift`; tags
+`archive/ts`, `archive/go-web`, `archive/swift-web`) if you build them.
 
 ## Run
 
 ```bash
 cd scripts/bench-web && npm install          # once: playwright-core only
-node scripts/bench-web/bench.mjs             # tracker-ts, both datasets, 3 runs
+node scripts/bench-web/bench.mjs             # tracker-rs, both datasets, 3 runs
 node scripts/bench-web/bench.mjs --datasets large --runs 5 --note "quiet machine"
 ```
 
-Options: `--builds ts` (comma-separated), `--datasets real,large`, `--runs 3`, `--cold 5` (cold+warm load
+Options: `--builds rs` (comma-separated), `--datasets real,large`, `--runs 3`, `--cold 5` (cold+warm load
 pairs per run), `--j 250` (`j` presses per run), `--bindir ~/.local/bin`, `--chrome <path>` (default:
 Playwright's chromium-1243), `--out <dir>`, `--note <text>`, `--regen` (rebuild the synthetic DB).
 A full default run takes about 10 minutes.
@@ -29,10 +29,10 @@ re-renders a summary.
   backup (the sandbox is only read), then copied fresh for every server. Tracks the sandbox's
   `artwork-cache.json` does not cover get placeholder entries in the copy, so no server looks art up on
   Spotify. The config is the sandbox's (it is never printed).
-- **large**: 25,000 synthetic tracks built from `internal/db/schema.sql` by `lib/data.mjs`
+- **large**: 25,000 synthetic tracks built from `crates/tracker-core/sql/schema.sql` by `lib/data.mjs`
   (deterministic, seed 42): composer/work/movement titles, `["Composer","Pianist", ...]` artists JSON,
   ~7,000 albums, long-tailed play counts, two years of timestamps, ~8% rated. Its
-  `artwork-cache.json` (the TypeScript `ArtworkService` format: `{"version":1,"artwork":{id:{small,medium,large}|null}}`)
+  `artwork-cache.json` (the `ArtworkService` format every build shares: `{"version":1,"artwork":{id:{small,medium,large}|null}}`)
   covers every track, and its config has no Spotify token. Cached in `results/data/large`.
 
 ## Method

@@ -365,7 +365,17 @@ pub(crate) mod tests {
     }
 
     fn run(dir: &Path, program: &str, stdin: &str, timeout: Option<Duration>) -> CommandOutput {
-        exec_command(&Invocation { dir, stdin, program, args: &[], timeout })
+        // A script written a moment ago can still be open for writing in a
+        // child another test thread has forked and not yet exec'd; exec then
+        // fails with ETXTBSY until that child execs.
+        for _ in 0..50 {
+            let output = exec_command(&Invocation { dir, stdin, program, args: &[], timeout });
+            if !matches!(output.failure, Some(CommandFailure::Start { kind: ErrorKind::ExecutableFileBusy, .. })) {
+                return output;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("{program} stayed busy");
     }
 
     #[test]

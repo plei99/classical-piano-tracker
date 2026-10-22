@@ -16,7 +16,9 @@ use wasm_bindgen::closure::Closure;
 use crate::artwork::ArtworkStore;
 use crate::cover::{Cover, CoverSize};
 
-pub const ROW_HEIGHT: f64 = 60.0;
+/// Row height in CSS pixels, an integer so styles never format a float.
+pub const ROW_PX: usize = 60;
+pub const ROW_HEIGHT: f64 = ROW_PX as f64;
 const OVERSCAN: usize = 6;
 
 /// One rendered row. Rows are keyed by their content, so an element
@@ -66,6 +68,18 @@ impl Shown {
     }
 }
 
+/// The track whose row an event happened in; none for placeholders.
+fn clicked_track(event: &web_sys::MouseEvent) -> Option<i64> {
+    let target = event.target()?.dyn_into::<web_sys::Element>().ok()?;
+    let row = target.closest("li.row[id]").ok()??;
+    track_id_of(&row.id())
+}
+
+/// The track ID in a row's element ID (`track-<id>`).
+fn track_id_of(element_id: &str) -> Option<i64> {
+    element_id.strip_prefix("track-")?.parse().ok()
+}
+
 /// The index range to render for a viewport.
 pub fn window_range(len: usize, scroll_top: f64, height: f64) -> (usize, usize) {
     let first = ((scroll_top / ROW_HEIGHT).floor() as usize).saturating_sub(OVERSCAN);
@@ -100,11 +114,13 @@ pub fn TrackList(model: RwSignal<WebModel>, send: Callback<Msg>, search_ref: Nod
         model.with(|m| (m.selected_index, m.shown_sort_mode(), m.shown_query().to_string(), m.list.len()))
     });
     Effect::new(move |_| {
-        let selected_index = selection.with(|selection| selection.0);
+        let (selected_index, len) = selection.with(|selection| (selection.0, selection.3));
         let Some(element) = viewport.get() else { return };
+        // The scroll position and height as the scroll event and the resize
+        // observer last reported them: reading the element's would force a
+        // layout in the middle of handling the key.
+        let (scroll, client_height) = (scroll_top.get_untracked(), height.get_untracked());
         let row_top = selected_index as f64 * ROW_HEIGHT;
-        let scroll = f64::from(element.scroll_top());
-        let client_height = f64::from(element.client_height());
         let target = if row_top < scroll {
             row_top
         } else if row_top + ROW_HEIGHT > scroll + client_height {
@@ -112,11 +128,12 @@ pub fn TrackList(model: RwSignal<WebModel>, send: Callback<Msg>, search_ref: Nod
         } else {
             return;
         };
+        let target = target.min(len as f64 * ROW_HEIGHT - client_height).max(0.0).round();
         element.set_scroll_top(target as i32);
         // Window the rows now rather than on the scroll event, which the
         // browser only fires with its next frame: a jump shows the selected
-        // row at once.
-        scroll_top.set(f64::from(element.scroll_top()));
+        // row at once, and the scroll event then finds nothing to do.
+        scroll_top.set(target);
     });
 
     let shown = Memo::new(move |_| {
@@ -160,12 +177,12 @@ pub fn TrackList(model: RwSignal<WebModel>, send: Callback<Msg>, search_ref: Nod
     let searching = Memo::new(move |_| model.with(|m| m.searching));
     let query = Memo::new(move |_| model.with(|m| m.search_query.clone()));
     let active = Memo::new(move |_| model.with(|m| m.selected_track().map(|track| format!("track-{}", track.id))));
-    let list_height = Memo::new(move |_| model.with(|m| m.list.len() as f64 * ROW_HEIGHT));
+    let list_height = Memo::new(move |_| model.with(|m| m.list.len() * ROW_PX));
 
     let row = move |row: RowData| {
         let id = row.id;
         let index = Memo::new(move |_| shown.with(|shown| shown.index_of(id)));
-        let top = move || format!("translateY({}px)", index.get().unwrap_or(0) as f64 * ROW_HEIGHT);
+        let top = move || format!("translateY({}px)", index.get().unwrap_or(0) * ROW_PX);
         let selected = move || index.get().is_some_and(|index| index == selected_index.get());
         if row.is_placeholder() {
             return Either::Left(view! {
@@ -190,11 +207,6 @@ pub fn TrackList(model: RwSignal<WebModel>, send: Callback<Msg>, search_ref: Nod
                 aria-selected=move || if selected() { "true" } else { "false" }
                 class=move || if selected() { "row row--selected" } else { "row" }
                 style:transform=top
-                on:click=move |_| send.run(Msg::Select { track_id: id })
-                on:dblclick=move |_| {
-                    send.run(Msg::Select { track_id: id });
-                    send.run(Msg::Key(KeyPress::typed('e')));
-                }
             >
                 <Cover url=url size=CoverSize::Small album_name=row.album_name.clone() />
                 <span class="row__id">{id}</span>
@@ -244,12 +256,26 @@ pub fn TrackList(model: RwSignal<WebModel>, send: Callback<Msg>, search_ref: Nod
                     }
                 }
             >
+                // One pair of listeners for every row, as React delegates
+                // events: rows come and go as the list scrolls, and
+                // attaching listeners to each costs more than the lookup.
                 <ul
                     class="rows"
                     role="listbox"
                     aria-label="Tracks"
                     aria-activedescendant=active
                     style:height=move || format!("{}px", list_height.get())
+                    on:click=move |event| {
+                        if let Some(id) = clicked_track(&event) {
+                            send.run(Msg::Select { track_id: id });
+                        }
+                    }
+                    on:dblclick=move |event| {
+                        if let Some(id) = clicked_track(&event) {
+                            send.run(Msg::Select { track_id: id });
+                            send.run(Msg::Key(KeyPress::typed('e')));
+                        }
+                    }
                 >
                     <For each=move || shown.get().rows key=|row| row.clone() children=row />
                 </ul>
@@ -261,6 +287,13 @@ pub fn TrackList(model: RwSignal<WebModel>, send: Callback<Msg>, search_ref: Nod
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_track_ids_from_row_element_ids() {
+        assert_eq!(track_id_of("track-42"), Some(42));
+        assert_eq!(track_id_of("track-"), None);
+        assert_eq!(track_id_of("tracks-heading"), None);
+    }
 
     #[test]
     fn windows_the_rows_near_the_viewport() {

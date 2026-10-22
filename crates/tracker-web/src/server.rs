@@ -147,6 +147,8 @@ pub struct WebServer {
     closing: watch::Sender<bool>,
     stop: oneshot::Sender<()>,
     task: JoinHandle<io::Result<()>>,
+    /// Held so [`WebServer::close`] decides where the library is freed.
+    app: Arc<App>,
 }
 
 impl WebServer {
@@ -182,7 +184,17 @@ impl WebServer {
         self.closing.send_replace(true);
         let _ = self.stop.send(());
         let _ = self.task.await;
+        // Freeing a large library (every row, sort order, and cached search)
+        // takes milliseconds that the caller, usually about to exit, need
+        // not wait for.
+        drop_in_background(self.app);
     }
+}
+
+/// Drops `value` on a thread of its own. A process that exits meanwhile does
+/// not wait for it.
+pub fn drop_in_background<T: Send + 'static>(value: T) {
+    let _ = std::thread::Builder::new().name("drop".into()).spawn(move || drop(value));
 }
 
 /// What keeps the server from stopping when its last tab closes.
@@ -346,7 +358,7 @@ pub async fn start(options: WebServerOptions) -> io::Result<WebServer> {
     });
     // The first read starts at once, so the page rarely waits for it.
     tokio::spawn(reload(Arc::clone(&app), Keep::Nothing));
-    let router = Router::new().fallback(handle).with_state(app);
+    let router = Router::new().fallback(handle).with_state(Arc::clone(&app));
     let (stop, stopped) = oneshot::channel::<()>();
     let task = tokio::spawn(async move {
         axum::serve(listener, router)
@@ -364,6 +376,7 @@ pub async fn start(options: WebServerOptions) -> io::Result<WebServer> {
         closing,
         stop,
         task,
+        app,
     })
 }
 

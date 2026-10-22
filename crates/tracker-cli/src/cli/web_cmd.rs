@@ -141,6 +141,8 @@ pub(crate) fn run(args: &WebArgs, opts: &RootOptions, io: &mut Io<'_>, deps: &We
         }
         let _ = tokio::time::timeout(CLOSE_TIMEOUT, server.close()).await;
         artwork.close();
+        // The last handle on the artwork cache; freeing it need not delay the exit.
+        tracker_web::server::drop_in_background(artwork);
         served?;
         if tabs_closed {
             writeln!(io.out, "{ALL_TABS_CLOSED_TEXT}")?;

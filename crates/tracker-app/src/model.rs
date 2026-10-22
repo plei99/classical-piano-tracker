@@ -5,8 +5,10 @@
 //! result re-enters `update` as a message.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use anyhow::Result;
+
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use tracker_core::{Rating, SyncStats, Track, UpsertRatingParams, artists};
@@ -242,8 +244,48 @@ pub struct BrowserModel<L> {
     pub status_message: String,
     pub status_is_error: bool,
     pub err: Option<String>,
-    /// Looked up once; timestamps render in local time like Go's time.Unix.
-    pub time_zone: TimeZone,
+    /// Timestamps render in local time like Go's time.Unix.
+    pub time_zone: Zone,
+}
+
+/// The current Unix second. In the browser it comes from `Date.now()`, so
+/// the client needs none of jiff's clock support.
+fn now() -> i64 {
+    #[cfg(target_arch = "wasm32")]
+    return (js_sys::Date::now() / 1000.0) as i64;
+    #[cfg(not(target_arch = "wasm32"))]
+    Timestamp::now().as_second()
+}
+
+/// The zone timestamps are shown in.
+#[derive(Debug, Clone)]
+pub enum Zone {
+    /// The system's, as jiff finds it (the terminal, and the web server's
+    /// first render).
+    System,
+    Tz(TimeZone),
+    /// The UTC offset in seconds at each Unix second. The browser reads it
+    /// from JavaScript's `Date`, as the TypeScript build did: asking `Intl`
+    /// for the zone's name costs milliseconds at startup, and the zone
+    /// database would add 200 KB to the client.
+    Offset(fn(i64) -> i32),
+}
+
+impl Zone {
+    fn at(&self, timestamp: Timestamp) -> TimeZone {
+        match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            Zone::System => TimeZone::system(),
+            // The browser sets an `Offset`; keeping jiff's zone lookup out of
+            // the wasm build keeps its bundled zone database out too.
+            #[cfg(target_arch = "wasm32")]
+            Zone::System => TimeZone::UTC,
+            Zone::Tz(zone) => zone.clone(),
+            Zone::Offset(offset) => {
+                jiff::tz::Offset::from_seconds(offset(timestamp.as_second())).map_or(TimeZone::UTC, TimeZone::fixed)
+            }
+        }
+    }
 }
 
 impl<L: Default> Default for BrowserModel<L> {
@@ -267,7 +309,7 @@ impl<L: Default> Default for BrowserModel<L> {
             status_message: String::new(),
             status_is_error: false,
             err: None,
-            time_zone: TimeZone::system(),
+            time_zone: Zone::System,
         }
     }
 }
@@ -626,7 +668,7 @@ impl<L: TrackList> BrowserModel<L> {
             track_id,
             stars: self.draft_stars,
             opinion: self.draft_opinion.trim().to_string(),
-            updated_at: Timestamp::now().as_second(),
+            updated_at: now(),
         };
         self.editing_rating = false;
         self.saving_rating = true;
@@ -750,12 +792,36 @@ impl<L: TrackList> BrowserModel<L> {
             // Outside jiff's supported range (years beyond ±9999).
             return seconds.to_string();
         };
-        let zoned = timestamp.to_zoned(self.time_zone.clone());
-        if zoned.offset().seconds() == 0 {
-            zoned.strftime("%Y-%m-%dT%H:%M:%SZ").to_string()
-        } else {
-            zoned.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()
+        let zoned = timestamp.to_zoned(self.time_zone.at(timestamp));
+        // What `strftime("%Y-%m-%dT%H:%M:%S%:z")` prints ("Z" for UTC),
+        // written directly: in the browser, jiff's format machinery is code
+        // to download and compile for one string.
+        let (date, time) = (zoned.date(), zoned.time());
+        let year = date.year();
+        let mut out = String::with_capacity(25);
+        let sign = if year < 0 { "-" } else { "" };
+        let _ = write!(
+            out,
+            "{sign}{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+            year.unsigned_abs(),
+            date.month(),
+            date.day(),
+            time.hour(),
+            time.minute(),
+            time.second()
+        );
+        let offset = zoned.offset().seconds();
+        if offset == 0 {
+            out.push('Z');
+            return out;
         }
+        let total = offset.unsigned_abs();
+        let sign = if offset < 0 { '-' } else { '+' };
+        let _ = write!(out, "{sign}{:02}:{:02}", total / 3600, total / 60 % 60);
+        if total % 60 != 0 {
+            let _ = write!(out, ":{:02}", total % 60);
+        }
+        out
     }
 }
 

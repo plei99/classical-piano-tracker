@@ -117,7 +117,13 @@ pub fn WebApp(
         store.seed(&view.rows);
     }
     provide_context(store);
-    let model = RwSignal::new(WebModel::from_initial(Services::ALL, initial));
+    #[allow(unused_mut)]
+    let mut start = WebModel::from_initial(Services::ALL, initial);
+    #[cfg(target_arch = "wasm32")]
+    {
+        start.time_zone = tracker_app::Zone::Offset(crate::deps::local_offset);
+    }
+    let model = RwSignal::new(start);
     let runtime = Runtime { model, deps: StoredValue::new(deps), store };
     let player = Player::new();
     let theme = RwSignal::new(theme);

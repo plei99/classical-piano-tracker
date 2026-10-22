@@ -47,7 +47,3 @@ web-sys = { version = "0.3", features = [
     "Window",
 ] }
 
-# The browser has no clock or zone database of its own for Rust: read the
-# time and zone through JavaScript and bundle the IANA database.
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-jiff = { version = "0.2.37", features = ["js", "tzdb-bundle-always"] }

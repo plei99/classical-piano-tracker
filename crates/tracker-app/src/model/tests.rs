@@ -22,7 +22,7 @@ pub(crate) fn tracks() -> Vec<Track> {
 
 /// A model with three tracks loaded (ordered 1, 2, 3) and timestamps in UTC.
 pub(crate) fn loaded() -> Model {
-    let mut model = Model { time_zone: TimeZone::UTC, ..Model::new(Services::ALL) };
+    let mut model = Model { time_zone: Zone::Tz(TimeZone::UTC), ..Model::new(Services::ALL) };
     model.update(Msg::TracksLoaded(Ok(TracksLoaded::new(tracks(), Vec::new()))));
     model
 }
@@ -133,4 +133,39 @@ fn failures_come_back_as_messages() {
     let mut model = Model { loading_tracks: true, ..Model::default() };
     model.update(Msg::TracksLoaded(Err(anyhow!("locked").context("list tracks"))));
     assert_eq!(model.err.as_deref(), Some("list tracks: locked"));
+}
+
+#[test]
+fn format_time_matches_strftime() {
+    let zones = [
+        TimeZone::UTC,
+        TimeZone::fixed(jiff::tz::offset(9)),
+        TimeZone::fixed(jiff::tz::Offset::from_seconds(-(3 * 3600 + 30 * 60)).unwrap()),
+        // Local mean time offsets have seconds.
+        TimeZone::fixed(jiff::tz::Offset::from_seconds(17 * 60 + 30).unwrap()),
+        TimeZone::get("America/New_York").unwrap(),
+    ];
+    let seconds = [
+        Timestamp::MIN.as_second() + 86_400,
+        -62_135_596_800,
+        -1,
+        0,
+        1_700_000_000,
+        1_783_000_000,
+        Timestamp::MAX.as_second() - 86_400,
+    ];
+    for zone in zones {
+        let model = Model { time_zone: Zone::Tz(zone.clone()), ..Model::new(Services::ALL) };
+        for second in seconds {
+            let zoned = Timestamp::from_second(second).unwrap().to_zoned(zone.clone());
+            let want = if zoned.offset().seconds() == 0 {
+                zoned.strftime("%Y-%m-%dT%H:%M:%SZ").to_string()
+            } else {
+                zoned.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()
+            };
+            assert_eq!(model.format_time(second), want, "{second} in {zone:?}");
+        }
+    }
+    let browser = Model { time_zone: Zone::Offset(|_| -(4 * 3600)), ..Model::new(Services::ALL) };
+    assert_eq!(browser.format_time(0), "1969-12-31T20:00:00-04:00");
 }

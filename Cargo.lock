@@ -1585,14 +1585,11 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
- "jiff-tzdb",
  "jiff-tzdb-platform",
- "js-sys",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "wasm-bindgen",
  "windows-link",
 ]
 
@@ -3537,6 +3534,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "jiff",
+ "js-sys",
  "serde",
  "serde_json",
  "tracker-core",
@@ -3641,7 +3639,6 @@ dependencies = [
  "anyhow",
  "console_error_panic_hook",
  "hydration_context",
- "jiff",
  "js-sys",
  "leptos",
  "serde",

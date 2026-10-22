@@ -34,6 +34,13 @@ pub fn initial_state() -> InitialState {
         .unwrap_or_default()
 }
 
+/// The browser's UTC offset in seconds at a Unix second, from `Date`.
+#[cfg(target_arch = "wasm32")]
+pub fn local_offset(seconds: i64) -> i32 {
+    let date = js_sys::Date::new(&JsValue::from_f64(seconds as f64 * 1000.0));
+    (-date.get_timezone_offset() * 60.0) as i32
+}
+
 /// The message of a rejected promise (a JavaScript `Error`, usually).
 pub fn js_error(value: JsValue) -> anyhow::Error {
     match value.dyn_ref::<js_sys::Error>() {

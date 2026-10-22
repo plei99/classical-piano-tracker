@@ -11,7 +11,7 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
-use tracker_app::{LocalTracks, Model, Services, SortMode, TrackList, TrackRow};
+use tracker_app::{LocalTracks, Model, Services, SortMode, TrackList, TrackRow, Zone};
 use tracker_core::db::Queries;
 use tracker_core::{Db, Rating, SyncStats, Track, UpsertRatingParams, UpsertTrackParams};
 
@@ -43,7 +43,7 @@ fn searchable(id: i64, name: &str, album: &str, artists: &str, last_played_at: i
 fn with_tracks(tracks: Vec<Track>) -> Model {
     Model {
         list: LocalTracks::new(tracks.into_iter().map(TrackRow::new).collect(), HashMap::new()),
-        time_zone: TimeZone::UTC,
+        time_zone: Zone::Tz(TimeZone::UTC),
         ..Model::default()
     }
 }
@@ -865,7 +865,7 @@ fn golden_tracks(n: usize, long: bool) -> Vec<Track> {
 }
 
 fn golden_model(width: u16, height: u16, tracks: usize, long: bool) -> Model {
-    let mut model = Model { time_zone: TimeZone::UTC, ..Model::default() };
+    let mut model = Model { time_zone: Zone::Tz(TimeZone::UTC), ..Model::default() };
     model.update(Msg::Resize { width, height });
     model.update(loaded(
         golden_tracks(tracks, long),

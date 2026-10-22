@@ -17,6 +17,6 @@ pub mod remote;
 
 pub use list::{LocalTracks, TrackList};
 pub use model::{
-    BrowserModel, Cmd, EditorField, KeyPress, Model, Msg, Services, SortMode, TrackRow, TracksLoaded, WebModel,
+    BrowserModel, Cmd, EditorField, KeyPress, Model, Msg, Services, SortMode, TrackRow, TracksLoaded, WebModel, Zone,
 };
 pub use remote::{RemoteTracks, ViewKind, ViewRequest};

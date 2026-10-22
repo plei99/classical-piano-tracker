@@ -22,7 +22,7 @@ pub fn fetch_tracks(load: &LoadFn) -> Result<TracksLoaded> {
 pub fn execute(deps: &Deps, cmd: Cmd) -> Option<Msg> {
     Some(match cmd {
         // The terminal's list is never fetched.
-        Cmd::Quit | Cmd::FetchView(_) => return None,
+        Cmd::Quit => return None,
         Cmd::LoadTracks => Msg::TracksLoaded(fetch_tracks(&deps.load)),
         Cmd::Sync => Msg::SyncFinished(guarded(|| (deps.sync)())),
         Cmd::SaveRating(params) => {

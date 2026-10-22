@@ -6,9 +6,9 @@ LAUNCH_AGENT_PATH := $(HOME)/Library/LaunchAgents/$(LAUNCH_AGENT_LABEL).plist
 LAUNCH_LOG_DIR := $(HOME)/Library/Logs/piano-tracker
 
 .PHONY: build install check
-# target/release/tracker, with the web client compiled to WebAssembly and
-# embedded (see "Development" in the README for the tools that needs).
-build:
+# target/release/tracker, with the web client (web/, TypeScript) bundled and
+# embedded by tracker-web's build script, which needs Node 24 or later.
+build: web/node_modules
 	cargo build --release --locked
 
 # Builds the release binary, installs it, and on macOS (re)loads the launch
@@ -29,8 +29,20 @@ install: build
 		launchctl kickstart -k "gui/$$(id -u)/$(LAUNCH_AGENT_LABEL)"; \
 	fi
 
-# Formatting, lints, and tests: what must pass before committing.
-check:
+# Formatting, lints, and tests: what must pass before committing. The web
+# client's TypeScript bindings are generated from the Rust types by
+# `cargo test`; they must match what is staged or committed. The client is then
+# type-checked against them and tested, including against the server just
+# built (src/client/contract.test.ts).
+check: web/node_modules
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets --locked -- -D warnings
 	cargo test --workspace --locked
+	@git diff --quiet -- web/src/generated && test -z "$$(git ls-files --others --exclude-standard -- web/src/generated)" || \
+		{ git status --short -- web/src/generated; echo "web/src/generated is stale: add what cargo test wrote"; exit 1; }
+	cd web && npm run --silent typecheck && npm run --silent format:check && \
+		TRACKER_BIN=$(CURDIR)/target/debug/tracker npm test --silent
+
+web/node_modules: web/package.json web/package-lock.json
+	npm ci --prefix web --no-audit --no-fund
+	touch web/node_modules

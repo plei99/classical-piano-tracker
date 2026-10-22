@@ -33,7 +33,8 @@ fn screens() {
     assert_eq!(error_text(&failed), "Error: database is locked");
     assert_eq!(screen(&Model::default()), Screen::Empty);
     let mut model = loaded();
-    model.update(Msg::SetSearch(" zzz ".into()));
+    model.search_query = " zzz ".into();
+    model.refresh_track_list(model.selected_track_id());
     assert_eq!(screen(&model), Screen::NoMatch);
     assert_eq!(no_match_text(&model), "No tracks match /zzz");
     assert_eq!(screen(&loaded()), Screen::Browse);
@@ -52,7 +53,8 @@ fn status_lines() {
 
     let mut model = loaded();
     model.update(Msg::Key(KeyPress::typed('/')));
-    model.update(Msg::SetSearch("track 2".into()));
+    model.search_query = "track 2".into();
+    model.refresh_track_list(model.selected_track_id());
     assert_eq!(status_of(&model), Some(("Search /track 2_ (1/3)".into(), false)));
     assert_eq!(track_list_summary(&model), "1/3 shown · sort: recent");
     model.update(Msg::Key(KeyPress::named("enter")));

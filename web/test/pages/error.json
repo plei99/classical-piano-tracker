@@ -1,0 +1,7 @@
+{
+  "theme": "auto",
+  "initial": {
+    "view": null,
+    "error": "read tracks: database is locked <&>"
+  }
+}

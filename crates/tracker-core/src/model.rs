@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Track {
@@ -18,6 +19,7 @@ pub struct Track {
     pub created_at: i64,
 }
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rating {
@@ -36,6 +38,7 @@ pub struct UpsertTrackParams {
     pub last_played_at: i64,
 }
 
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertRatingParams {
@@ -47,6 +50,7 @@ pub struct UpsertRatingParams {
 
 /// Outcome of one sync run. Lives here (not in the spotify crate) so the TUI
 /// can report sync results without depending on the network stack.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStats {

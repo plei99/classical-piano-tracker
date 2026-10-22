@@ -10,8 +10,9 @@
 # Cargo build output
 /target/
 
-# Node (scripts/bench-web)
+# Node (web/, scripts/bench-web)
 node_modules/
+/web/dist/
 
 # Local data
 *.sqlite3

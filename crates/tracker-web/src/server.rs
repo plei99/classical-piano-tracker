@@ -64,10 +64,9 @@ const FIRST_LOAD_WAIT: Duration = Duration::from_secs(1);
 
 /// Spotify's iFrame API loader (open.spotify.com) pulls its code from
 /// embed-cdn.spotifycdn.com, and that code evaluates strings, so
-/// 'unsafe-eval' is required for in-page playback; it also covers compiling
-/// the client's WebAssembly. It does not allow inline scripts: only this
-/// app's bundle and Spotify's scripts can run, and the app never passes
-/// strings to eval. Identical to the TypeScript build's policy.
+/// 'unsafe-eval' is required for in-page playback. It does not allow inline
+/// scripts: only this app's bundle and Spotify's scripts can run, and the
+/// app never passes strings to eval.
 pub const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' https://open.spotify.com https://embed-cdn.spotifycdn.com; frame-src https://open.spotify.com; \
      img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; \
      form-action 'none'";
@@ -518,7 +517,7 @@ async fn page(app: &Arc<App>, template: &str, theme: Theme) -> String {
     let initial = initial_state(app).await;
     let script =
         format!(r#"<script type="application/json" id="{INITIAL_STATE_ID}">{}</script>"#, initial.to_script_json());
-    let markup = tracker_web_client::render_app(initial, theme);
+    let markup = crate::page::render_app(&initial, theme, tracker_app::Zone::System);
     page.replacen(APP_PLACEHOLDER, &markup, 1).replacen(INITIAL_PLACEHOLDER, &script, 1)
 }
 

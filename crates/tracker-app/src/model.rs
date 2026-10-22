@@ -1,8 +1,8 @@
 //! The track browser's state machine. `Model::update` is the only place state
 //! changes, and it never blocks: I/O is returned as a [`Cmd`] for the front
 //! end to execute, mirroring Bubble Tea's Elm architecture. The terminal runs
-//! commands on background threads and the browser as fetches; either way the
-//! result re-enters `update` as a message.
+//! commands on background threads, and the result re-enters `update` as a
+//! message. (The web UI runs a TypeScript port of this model, web/src/app.)
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -13,9 +13,7 @@ use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use tracker_core::{Rating, SyncStats, Track, UpsertRatingParams, artists};
 
-use crate::api::{InitialState, ViewResponse};
-use crate::list::{LocalTracks, Refresh, TrackList};
-use crate::remote::{RemoteTracks, ViewKind, ViewOutcome, ViewRequest};
+use crate::list::{LocalTracks, TrackList};
 
 /// Track orderings, cycled with `o`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -131,13 +129,6 @@ impl KeyPress {
     }
 }
 
-/// The rating editor's two fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EditorField {
-    Stars,
-    Opinion,
-}
-
 /// Everything that can change the model: input and the results of
 /// background work.
 pub enum Msg {
@@ -154,34 +145,6 @@ pub enum Msg {
         track_id: i64,
         result: Result<Rating>,
     },
-
-    // Intents from front ends with a pointer and form fields (the web UI).
-    // The keyboard flow stays the source of truth; these are the clicks and
-    // text fields that stand in for it, with the same guards as the keys.
-    /// Clicking a row selects that track.
-    Select {
-        track_id: i64,
-    },
-    /// Typing in the search field replaces the whole query.
-    SetSearch(String),
-    /// Clicking a star in the rating editor.
-    SetDraftStars(i64),
-    /// Editing the opinion text field.
-    SetDraftOpinion(String),
-    /// Focusing an editor field.
-    FocusField(EditorField),
-
-    // Front ends whose list is fetched in windows (the web UI).
-    /// The answer to a [`Cmd::FetchView`].
-    ViewLoaded {
-        request: ViewRequest,
-        result: Result<ViewResponse>,
-    },
-    /// Rows `first..last` are on screen.
-    Viewport {
-        first: usize,
-        last: usize,
-    },
 }
 
 /// Work requested by `update`. Each command except `Quit` answers with one
@@ -195,9 +158,6 @@ pub enum Cmd {
     Sync,
     /// Save a rating; answers with [`Msg::RatingSaved`].
     SaveRating(UpsertRatingParams),
-    /// Fetch a window of the list (and, for [`ViewKind::Reload`], re-read
-    /// the database first); answers with [`Msg::ViewLoaded`].
-    FetchView(ViewRequest),
 }
 
 /// The optional services a front end provides. Without one, the matching
@@ -214,8 +174,6 @@ impl Services {
 
 /// The terminal's model: the whole library in memory.
 pub type Model = BrowserModel<LocalTracks>;
-/// The web client's model: windows of a library the server holds.
-pub type WebModel = BrowserModel<RemoteTracks>;
 
 /// The root model, over the list it browses.
 #[derive(Clone)]
@@ -228,12 +186,9 @@ pub struct BrowserModel<L> {
     pub saving_rating: bool,
     pub searching: bool,
     pub search_query: String,
-    /// The tracks, filtered by `search_query` and ordered by `sort_mode`
-    /// (once any fetch in flight has arrived).
+    /// The tracks, filtered by `search_query` and ordered by `sort_mode`.
     pub list: L,
     pub sort_mode: SortMode,
-    /// The selected row. In the web UI it may not be loaded yet (after a
-    /// jump); it is drawn as a placeholder until its window arrives.
     pub selected_index: usize,
     pub editing_rating: bool,
     /// Moves focus from the stars field to the opinion, where digits are
@@ -248,42 +203,20 @@ pub struct BrowserModel<L> {
     pub time_zone: Zone,
 }
 
-/// The current Unix second. In the browser it comes from `Date.now()`, so
-/// the client needs none of jiff's clock support.
-fn now() -> i64 {
-    #[cfg(target_arch = "wasm32")]
-    return (js_sys::Date::now() / 1000.0) as i64;
-    #[cfg(not(target_arch = "wasm32"))]
-    Timestamp::now().as_second()
-}
-
 /// The zone timestamps are shown in.
 #[derive(Debug, Clone)]
 pub enum Zone {
-    /// The system's, as jiff finds it (the terminal, and the web server's
-    /// first render).
+    /// The system's, as jiff finds it (looked up when formatting, so it
+    /// follows a change of zone).
     System,
     Tz(TimeZone),
-    /// The UTC offset in seconds at each Unix second. The browser reads it
-    /// from JavaScript's `Date`, as the TypeScript build did: asking `Intl`
-    /// for the zone's name costs milliseconds at startup, and the zone
-    /// database would add 200 KB to the client.
-    Offset(fn(i64) -> i32),
 }
 
 impl Zone {
-    fn at(&self, timestamp: Timestamp) -> TimeZone {
+    fn get(&self) -> TimeZone {
         match self {
-            #[cfg(not(target_arch = "wasm32"))]
             Zone::System => TimeZone::system(),
-            // The browser sets an `Offset`; keeping jiff's zone lookup out of
-            // the wasm build keeps its bundled zone database out too.
-            #[cfg(target_arch = "wasm32")]
-            Zone::System => TimeZone::UTC,
             Zone::Tz(zone) => zone.clone(),
-            Zone::Offset(offset) => {
-                jiff::tz::Offset::from_seconds(offset(timestamp.as_second())).map_or(TimeZone::UTC, TimeZone::fixed)
-            }
         }
     }
 }
@@ -322,33 +255,10 @@ impl<L: TrackList + Default> BrowserModel<L> {
     }
 }
 
-impl WebModel {
-    /// The state a server-rendered page starts in: the first window of the
-    /// default view, the error screen, or loading.
-    pub fn from_initial(services: Services, initial: InitialState) -> WebModel {
-        let mut model = WebModel::new(services);
-        if let Some(view) = initial.view {
-            model.loading_tracks = false;
-            model.list = RemoteTracks::from_view(model.sort_mode, &model.search_query, view);
-        } else if let Some(error) = initial.error {
-            model.loading_tracks = false;
-            model.err = Some(error);
-        }
-        model
-    }
-}
-
 impl<L: TrackList> BrowserModel<L> {
-    /// The command to run at startup: an asynchronous library read. A page
-    /// that has to fetch its first list asks the server to re-read the
-    /// database, so a failure shows the error screen with Retry.
+    /// The command to run at startup: an asynchronous library read.
     pub fn init(&mut self) -> Option<Cmd> {
-        Some(self.load(true))
-    }
-
-    fn load(&mut self, reread: bool) -> Cmd {
-        let selected_track_id = self.selected_track_id();
-        self.list.load(reread, self.sort_mode, &self.search_query, selected_track_id)
+        Some(Cmd::LoadTracks)
     }
 
     /// Applies one message and returns any follow-up work.
@@ -371,7 +281,8 @@ impl<L: TrackList> BrowserModel<L> {
                 let selected_track_id = self.selected_track_id();
                 self.err = None;
                 self.list.tracks_loaded(loaded);
-                self.refresh_track_list(selected_track_id)
+                self.refresh_track_list(selected_track_id);
+                None
             }
             Msg::SyncFinished(result) => {
                 self.syncing = false;
@@ -390,8 +301,7 @@ impl<L: TrackList> BrowserModel<L> {
                     false,
                 );
                 self.loading_tracks = true;
-                // The web server re-reads the database itself after a sync.
-                Some(self.load(false))
+                Some(Cmd::LoadTracks)
             }
             Msg::RatingSaved { track_id, result } => {
                 self.saving_rating = false;
@@ -403,13 +313,11 @@ impl<L: TrackList> BrowserModel<L> {
                     }
                 };
                 let stars = rating.stars;
-                let cmd = if self.list.rating_saved(track_id, rating, self.sort_mode) {
-                    self.refresh_track_list(track_id)
-                } else {
-                    None
-                };
+                if self.list.rating_saved(track_id, rating, self.sort_mode) {
+                    self.refresh_track_list(track_id);
+                }
                 self.set_status(format!("Saved {stars}/5 rating for track {track_id}"), false);
-                cmd
+                None
             }
             Msg::Key(key) => {
                 if self.editing_rating {
@@ -429,72 +337,7 @@ impl<L: TrackList> BrowserModel<L> {
                 } else if self.searching {
                     self.search_query.push_str(&content);
                     self.clear_status();
-                    return self.refresh_track_list(self.selected_track_id());
-                }
-                None
-            }
-            Msg::Select { track_id } => {
-                if self.syncing || self.saving_rating || self.editing_rating {
-                    return None;
-                }
-                let index = self.list.index_of(track_id)?;
-                self.move_selection_to(index)
-            }
-            Msg::SetSearch(query) => {
-                if self.syncing || self.saving_rating || self.editing_rating || query == self.search_query {
-                    return None;
-                }
-                let selected_track_id = self.selected_track_id();
-                self.search_query = query;
-                self.clear_status();
-                self.refresh_track_list(selected_track_id)
-            }
-            Msg::SetDraftStars(stars) => {
-                if self.editing_rating && (0..=5).contains(&stars) {
-                    self.draft_stars = stars;
-                }
-                None
-            }
-            Msg::SetDraftOpinion(text) => {
-                if self.editing_rating {
-                    self.draft_opinion = text;
-                    self.editing_opinion = true;
-                }
-                None
-            }
-            Msg::FocusField(field) => {
-                if self.editing_rating {
-                    self.editing_opinion = field == EditorField::Opinion;
-                }
-                None
-            }
-            Msg::ViewLoaded { request, result } => self.view_loaded(&request, result),
-            Msg::Viewport { first, last } => self.list.viewport(first, last),
-        }
-    }
-
-    /// Applies a fetched window, with the terminal's selection rules for a
-    /// new list.
-    fn view_loaded(&mut self, request: &ViewRequest, result: Result<ViewResponse>) -> Option<Cmd> {
-        let selected_track_id = self.selected_track_id();
-        match self.list.view_loaded(request, result, selected_track_id) {
-            ViewOutcome::Stale => None,
-            ViewOutcome::Replaced(index) => {
-                self.loading_tracks = false;
-                self.err = None;
-                self.select_after_refresh(index);
-                None
-            }
-            ViewOutcome::Retarget | ViewOutcome::Outdated => self.refresh_track_list(selected_track_id),
-            ViewOutcome::Merged => None,
-            ViewOutcome::Failed(err) => {
-                self.loading_tracks = false;
-                // Only a re-read (`r`, Retry, the first load) replaces the
-                // list with the error screen; otherwise the rows stay.
-                if request.kind == ViewKind::Reload {
-                    self.err = Some(format!("{err:#}"));
-                } else {
-                    self.set_status(format!("{err:#}"), true);
+                    self.refresh_track_list(self.selected_track_id());
                 }
                 None
             }
@@ -510,7 +353,7 @@ impl<L: TrackList> BrowserModel<L> {
                 self.loading_tracks = true;
                 self.err = None;
                 self.clear_status();
-                Some(self.load(true))
+                Some(Cmd::LoadTracks)
             }
             "s" => {
                 if self.syncing {
@@ -545,7 +388,8 @@ impl<L: TrackList> BrowserModel<L> {
                 }
                 self.search_query.clear();
                 self.clear_status();
-                self.refresh_track_list(self.selected_track_id())
+                self.refresh_track_list(self.selected_track_id());
+                None
             }
             "e" | "enter" => {
                 if self.selected_track().is_none() || self.saving_rating {
@@ -602,7 +446,8 @@ impl<L: TrackList> BrowserModel<L> {
             _ => self.search_query.push(key.text?),
         }
         self.clear_status();
-        self.refresh_track_list(self.selected_track_id())
+        self.refresh_track_list(self.selected_track_id());
+        None
     }
 
     fn handle_rating_editor_key(&mut self, key: &KeyPress) -> Option<Cmd> {
@@ -668,7 +513,7 @@ impl<L: TrackList> BrowserModel<L> {
             track_id,
             stars: self.draft_stars,
             opinion: self.draft_opinion.trim().to_string(),
-            updated_at: now(),
+            updated_at: Timestamp::now().as_second(),
         };
         self.editing_rating = false;
         self.saving_rating = true;
@@ -700,17 +545,6 @@ impl<L: TrackList> BrowserModel<L> {
         (0..self.list.len()).filter_map(|index| self.list.row(index))
     }
 
-    /// The order the list shows: the model's, or for a fetched list the one
-    /// it was fetched with until the next arrives.
-    pub fn shown_sort_mode(&self) -> SortMode {
-        self.list.applied().map_or(self.sort_mode, |(sort, _)| sort)
-    }
-
-    /// The query the list shows; see [`BrowserModel::shown_sort_mode`].
-    pub fn shown_query(&self) -> &str {
-        self.list.applied().map_or(&self.search_query, |(_, query)| query)
-    }
-
     fn move_selection_to(&mut self, index: usize) -> Option<Cmd> {
         if self.list.is_empty() {
             return None;
@@ -720,8 +554,7 @@ impl<L: TrackList> BrowserModel<L> {
             self.selected_index = index;
             self.clear_status();
         }
-        // A row not fetched yet shows as a placeholder until it arrives.
-        self.list.fetch(index)
+        None
     }
 
     /// Opens the rating editor on the stars field, prefilled from the saved
@@ -749,20 +582,15 @@ impl<L: TrackList> BrowserModel<L> {
     fn cycle_sort_mode(&mut self) -> Option<Cmd> {
         let selected_track_id = self.selected_track_id();
         self.sort_mode = self.sort_mode.next();
-        self.refresh_track_list(selected_track_id)
+        self.refresh_track_list(selected_track_id);
+        None
     }
 
     /// Re-sorts if needed, re-applies the search filter, and keeps the
-    /// selection on `selected_track_id` when it is still visible. A fetched
-    /// list does this when the answer arrives.
-    pub fn refresh_track_list(&mut self, selected_track_id: i64) -> Option<Cmd> {
-        match self.list.refresh(self.sort_mode, &self.search_query, selected_track_id) {
-            Refresh::Done(index) => {
-                self.select_after_refresh(index);
-                None
-            }
-            Refresh::Pending(cmd) => Some(cmd),
-        }
+    /// selection on `selected_track_id` when it is still visible.
+    pub fn refresh_track_list(&mut self, selected_track_id: i64) {
+        let index = self.list.refresh(self.sort_mode, &self.search_query, selected_track_id);
+        self.select_after_refresh(index);
     }
 
     /// Selects the kept track, or the first row (closing the editor) when it
@@ -792,10 +620,9 @@ impl<L: TrackList> BrowserModel<L> {
             // Outside jiff's supported range (years beyond ±9999).
             return seconds.to_string();
         };
-        let zoned = timestamp.to_zoned(self.time_zone.at(timestamp));
+        let zoned = timestamp.to_zoned(self.time_zone.get());
         // What `strftime("%Y-%m-%dT%H:%M:%S%:z")` prints ("Z" for UTC),
-        // written directly: in the browser, jiff's format machinery is code
-        // to download and compile for one string.
+        // without going through jiff's format machinery.
         let (date, time) = (zoned.date(), zoned.time());
         let year = date.year();
         let mut out = String::with_capacity(25);

@@ -1,7 +1,7 @@
 //! The browser client, built and embedded by `build.rs`: the page template
-//! (the server renders the app into it), the stylesheet (the TypeScript
-//! build's, verbatim), a two-line boot module, and wasm-bindgen's output,
-//! each with gzip and brotli copies made at build time.
+//! (web/index.html; the server renders the first screen into it) and the
+//! client's bundled script and stylesheet, each with gzip and brotli copies
+//! made at build time.
 
 use axum::body::Bytes;
 
@@ -75,14 +75,13 @@ mod tests {
         assert!(page.contains(r#"<html lang="en" data-theme="%TRACKER_THEME%">"#), "{page}");
         assert!(!page.contains("<script>"), "no inline scripts: the CSP forbids them");
         assert_eq!(assets["/"].content_type, "text/html; charset=utf-8");
+        assert!(page.contains(r#"<script type="module" src="/assets/app.js"></script>"#), "{page}");
         assert_eq!(assets["/assets/app.css"].content_type, "text/css; charset=utf-8");
-        assert_eq!(assets["/assets/client_bg.wasm"].content_type, "application/wasm");
-        assert!(assets["/assets/client_bg.wasm"].body.starts_with(b"\0asm"));
-        // Every script the page and the boot module load is embedded.
-        for url in ["/assets/app.js", "/assets/client.js"] {
-            assert_eq!(assets[url].content_type, "text/javascript; charset=utf-8", "{url}");
-        }
-        let boot = String::from_utf8_lossy(&assets["/assets/app.js"].body).into_owned();
-        assert!(boot.contains("from './client.js'"), "{boot}");
+        // The bundled client: one self-contained module, compressed at build time.
+        let app = &assets["/assets/app.js"];
+        assert_eq!(app.content_type, "text/javascript; charset=utf-8");
+        assert!(!String::from_utf8_lossy(&app.body).contains("import "), "the bundle imports nothing");
+        assert!(app.brotli.is_some() && app.gzip.is_some());
+        assert_eq!(assets.len(), 3, "the page, the script, and the stylesheet");
     }
 }

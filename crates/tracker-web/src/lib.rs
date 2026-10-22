@@ -1,14 +1,15 @@
-//! `tracker web`: a local HTTP server for the browser UI, which runs the
-//! same state machine as the terminal UI (`tracker_app`) compiled to
-//! WebAssembly. The server owns the database, the library (sorted, filtered,
-//! and sent a window at a time), the first render of the page, and the
-//! Spotify wiring; the client keeps the UI state and speaks the JSON API in
-//! `tracker_app::api`.
+//! `tracker web`: a local HTTP server for the browser UI (`web/`, TypeScript
+//! and Preact, embedded by the build script). The server owns the database,
+//! the library (sorted, filtered, and sent a window at a time), the first
+//! render of the page ([`page`]), and the Spotify wiring; the client keeps
+//! the UI state and speaks the JSON API in `tracker_app::api`, whose types it
+//! is generated from.
 
 pub mod artwork;
 pub mod assets;
 pub mod compress;
 pub mod library;
+pub mod page;
 pub mod server;
 
 pub use artwork::{

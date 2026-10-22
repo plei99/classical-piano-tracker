@@ -1,6 +1,6 @@
 # Classical Piano Tracker
 
-A command-line tool, terminal UI, and local web UI for tracking, filtering, rating, and exploring your classical piano listening history from Spotify. Written in Rust.
+A command-line tool, terminal UI, and local web UI for tracking, filtering, rating, and exploring your classical piano listening history from Spotify. Written in Rust, with the browser UI in TypeScript.
 
 ## Warning
 
@@ -12,8 +12,9 @@ Based on the author's testing so far, `gpt-5.4` seems to produce the best recomm
 - Rust, as one Cargo workspace that builds a single `tracker` binary
 - clap for the CLI
 - ratatui and crossterm for the terminal UI
-- axum for the local web server, and Leptos for the browser UI (rendered on
-  the server, then hydrated as WebAssembly)
+- axum for the local web server; the browser UI is TypeScript and Preact
+  (rendered on the server by Rust, then adopted by the client), bundled with
+  esbuild and embedded in the binary
 - SQLite via rusqlite (SQLite is compiled in)
 - Spotify's Web API over ureq
 
@@ -29,8 +30,8 @@ Based on the author's testing so far, `gpt-5.4` seems to produce the best recomm
 
 ## Requirements
 
-- a Rust toolchain (edition 2024) with the `wasm32-unknown-unknown` target, and the
-  `wasm-bindgen` CLI for the web UI (see [Development](#development))
+- a Rust toolchain (edition 2024)
+- Node 24 or later and npm, to build the web UI (see [Development](#development))
 - a Spotify developer application with a client ID and client secret
 - a Spotify account with listening history to sync
 - optionally, an LLM API key, a local Ollama model, or a signed-in Codex/Claude Code CLI for taste summaries and pianist recommendations
@@ -377,15 +378,15 @@ adds:
   the server reads to render the page in that theme (no flash, no boot
   script).
 
-The TUI and the web UI share their state machine and their wording and
-layout decisions (`crates/tracker-app`: `model.rs` and `presenter.rs`).
-Only the drawing differs: ratatui in `crates/tracker-tui`, Leptos
-components with CSS in `crates/tracker-web-client`.
+The web UI runs the TUI's state machine and wording: `crates/tracker-app`
+(`model.rs`, `presenter.rs`) in the terminal, and its TypeScript port in
+`web/src/app` in the browser, drawn with Preact components and CSS
+(`web/src/client`).
 
 ### How the work is split
 
-The web UI is a hybrid: the server owns the library and the browser owns
-the UI state.
+The web UI is a hybrid: the Rust server owns the library and the first
+render, and the browser owns the UI state.
 
 - **The server** (`crates/tracker-web`, axum on a current-thread tokio
   runtime) reads tracks and ratings once, at startup and again on reload,
@@ -395,30 +396,42 @@ the UI state.
   `search_needle` in `tracker-app`), so both front ends always agree. The
   blocking code (SQLite, the Spotify client, sync) runs on tokio's blocking
   pool. `GET /` renders the first screen (newest first, first track
-  selected, the first 100 rows) with the client's own Leptos components,
-  plus the data it was rendered from in
+  selected, the first 100 rows; `crates/tracker-web/src/page.rs`) with the
+  presenter's strings, plus the data it was rendered from in
   `<script type="application/json" id="tracker-initial">`. Reloading the
   page shows the server's copy; r re-reads the database (say, after a
   `tracker sync` in another terminal).
-- **The browser** (`crates/tracker-web-client`, compiled to wasm32) hydrates
-  that page and runs the TUI's model over `RemoteTracks`
-  (`crates/tracker-app/src/remote.rs`): a sparse cache of rows for one
-  sort, query, and library version. Moving between loaded rows never
+- **The browser** (`web/`, TypeScript and Preact, about 18 KiB with brotli)
+  adopts that markup as it is (Preact's `hydrate`) and runs the TUI's model
+  over a sparse cache of rows for one sort, query, and library version
+  (`web/src/client/remoteList.ts`). Moving between loaded rows never
   touches the network. The list pane fetches 100-row chunks ahead of the
   selection and the scroll position (two screens each way), so holding j/k
   or scrolling does not reach an unloaded row in practice; one that has
   not arrived yet is drawn as a placeholder of the same height. g/G jump by
-  index and fetch the window they land in.
-- **The model** (`BrowserModel<L: TrackList>`) works over a small list
-  interface (count, row lookup, index of a track; `crates/tracker-app/src/list.rs`).
-  The TUI's in-memory list (`LocalTracks`) re-sorts and filters
-  synchronously. A remote list turns re-sorting, searching, and reloading
-  into `/api/view` requests (`around` keeps the selected track selected, as
-  the TUI does); answers to superseded requests are dropped, and the counts
-  and sort label describe the rows on screen until the new ones arrive. A
-  saved rating shows at once; rows that later come back from a newer
+  index and fetch the window they land in. Re-sorting, searching, and
+  reloading are `/api/view` requests (`around` keeps the selected track
+  selected, as the TUI does); answers to superseded requests are dropped.
+  A saved rating shows at once; rows that later come back from a newer
   library version make the page refetch around the selection, keeping the
   old rows on screen until then.
+
+**How the two sides are kept in step.**
+
+- The API's types and constants are generated from the Rust definitions
+  (`crates/tracker-app/src/api.rs`, with ts-rs, into `web/src/generated`)
+  by `cargo test`, and the client is type-checked against them (`tsc`,
+  strict). `make check` fails if the committed bindings are stale.
+- The server's first render must be exactly what the client's components
+  render, since the client adopts it without re-rendering. The fixtures in
+  `web/test/pages` are rendered by the client's components into golden
+  files (`npm test`; `UPDATE_PAGES=1` rewrites them), and the Rust tests
+  render the same fixtures and compare byte for byte.
+- A contract test (`web/src/client/contract.test.ts`) starts the real
+  `tracker web` on a seeded database and drives it with the client's own
+  HTTP layer: the page and its initial data (whose `#root` must equal the
+  client's own render of that data), the list in each order, search, a
+  rating save, reload, artwork, and a request without the page's token.
 
 The API (types and details in `crates/tracker-app/src/api.rs`):
 
@@ -433,19 +446,16 @@ The API (types and details in `crates/tracker-app/src/api.rs`):
 - `GET /api/artwork?ids=`: album art for up to 50 tracks.
 - `GET /api/presence?token=`: the tab's presence stream.
 
-Responses are compressed when the browser allows: the WebAssembly, its
-JavaScript glue, and the stylesheet are compressed with brotli and gzip at
-build time (`crates/tracker-web/build.rs`) and embedded that way, and JSON
-and HTML over 1 KiB are compressed per response. The presence stream never
-is.
+Responses are compressed when the browser allows: the script and the
+stylesheet are compressed with brotli and gzip at build time
+(`crates/tracker-web/build.rs`) and embedded that way, and JSON and HTML
+over 1 KiB are compressed per response. The presence stream never is.
 
 The server listens on 127.0.0.1 only and rejects other Host headers. Every
 write, and the presence stream, needs a per-launch token embedded in the
 page, so another site cannot keep the server running. Spotify's player
-requires `'unsafe-eval'` in the page's script policy (it also covers
-compiling the WebAssembly); only this app's scripts and Spotify's can run.
-The page has no inline scripts: a two-line boot module calls the
-wasm-bindgen initializer.
+requires `'unsafe-eval'` in the page's script policy; only this app's
+script and Spotify's can run, and the page has no inline scripts.
 
 ## Recommendations
 
@@ -634,9 +644,10 @@ tracker web
 ## Development
 
 ```bash
-make build                    # cargo build --release: target/release/tracker
-make check                    # rustfmt, clippy (-D warnings), and tests
-cargo test --workspace
+make build                    # target/release/tracker (installs web/'s npm dependencies first)
+make check                    # Rust: rustfmt, clippy (-D warnings), tests; web/: bindings, tsc, Prettier, tests
+cargo test --workspace        # also regenerates web/src/generated
+cd web && npm test            # the web client's tests (UPDATE_PAGES=1 rewrites the page goldens)
 cargo bench -p tracker-tui    # TUI benchmarks (criterion)
 node scripts/bench-web/bench.mjs   # web UI benchmarks (headless Chromium; see its README)
 ```
@@ -651,95 +662,83 @@ runs a fresh build.
 
 ### Building the web client
 
-`cargo build --release` stays the only command. `tracker-web` depends on the
-client crate natively (with its `ssr` feature) to render the first screen,
-and its build script builds the browser side with a nested `cargo rustc`
-for `wasm32-unknown-unknown` (profile `wasm-release`, into
-`target/web-client`). It then runs `wasm-bindgen --target web` and
-`wasm-opt -Oz`, compresses every asset with gzip and brotli, and embeds the
-originals and the compressed copies. Cargo reruns it only when the client or
-the crates it compiles change. It needs:
+`cargo build --release` stays the only command: `tracker-web`'s build
+script runs `node web/build.mjs`, which bundles the client with esbuild
+(`app.js` and `app.css`), then compresses both with gzip and brotli and
+embeds them with the page template (`web/index.html`). It needs Node 24 or
+later and the client's dependencies (`npm ci --prefix web`, which
+`make build` and `make check` run). `TRACKER_WEB_CLIENT_DIR=<dir>` embeds an
+existing `app.js` and `app.css` instead.
 
-- a rustc with the `wasm32-unknown-unknown` target
-  (`rustup target add wasm32-unknown-unknown`). The script uses this build's
-  rustc if it has the target, otherwise a rustup toolchain (same release
-  first), otherwise `TRACKER_WASM_TOOLCHAIN=<toolchain dir>`. Homebrew's
-  `rust` has no wasm std, so with it the script falls back to a rustup
-  toolchain.
-- the `wasm-bindgen` CLI at exactly the version the client pins
-  (`cargo install wasm-bindgen-cli --version 0.2.129`; checked,
-  `WASM_BINDGEN` overrides the path);
-- `wasm-opt` (binaryen), optional; without it the client is embedded about
-  five times larger, with a build warning (`WASM_OPT` overrides the path).
-
-`TRACKER_WEB_CLIENT_DIR=<dir>` skips all of that and embeds an existing
-wasm-bindgen output directory. The client's pure logic (key routing,
-artwork batching, windowing) is tested natively with the rest of the
-workspace.
-
-| Crate               | Notes                                                                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tracker-core`      | Config, paths, and SQLite (rusqlite). The SQL lives in `sql/`, in sqlc's annotated format. Builds for wasm32 with its default `native` feature off.            |
-| `tracker-spotify`   | OAuth and Web API over blocking `ureq`. The sync checkpoint stays in nanoseconds.                                                                             |
-| `tracker-recommend` | Favorite-pianist scoring; the float math matches the Go build bit for bit.                                                                                    |
-| `tracker-llm`       | LLM providers. Prompts and request JSON match the Go build byte for byte.                                                                                     |
-| `tracker-app`       | State machine, presenter, list abstraction, and the web API contract, shared by the TUI and the web client. Pure; builds for wasm32.                           |
-| `tracker-tui`       | ratatui + crossterm. Frames match Go's goldens character for character. I/O runs on background threads that share one channel with input, so nothing polls. |
-| `tracker-web`       | `tracker web`: the axum server, the album-art service, compression, and the embedded client.                                                                  |
-| `tracker-web-client`| The Leptos client, compiled natively for the server's first render and to wasm32 for the browser.                                                             |
-| `tracker-cli`       | clap; builds the `tracker` binary. stdout, errors and exit codes match Go.                                                                                    |
+| Directory                   | Notes                                                                                                                                                       |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crates/tracker-core`       | Config, paths, and SQLite (rusqlite). The SQL lives in `sql/`, in sqlc's annotated format.                                                                  |
+| `crates/tracker-spotify`    | OAuth and Web API over blocking `ureq`. The sync checkpoint stays in nanoseconds.                                                                           |
+| `crates/tracker-recommend`  | Favorite-pianist scoring; the float math matches the Go build bit for bit.                                                                                  |
+| `crates/tracker-llm`        | LLM providers. Prompts and request JSON match the Go build byte for byte.                                                                                   |
+| `crates/tracker-app`        | The TUI's state machine, presenter, and list abstraction, and the web API contract the client's types are generated from. Pure.                           |
+| `crates/tracker-tui`        | ratatui + crossterm. Frames match Go's goldens character for character. I/O runs on background threads that share one channel with input, so nothing polls. |
+| `crates/tracker-web`        | `tracker web`: the axum server, the first render (`page.rs`), the album-art service, compression, and the embedded client.                                  |
+| `crates/tracker-cli`        | clap; builds the `tracker` binary. stdout, errors and exit codes match Go.                                                                                  |
+| `web/`                      | The browser client: TypeScript, Preact, esbuild, vitest. `src/app` is the TUI's model ported, `src/client` the components, `src/generated` the API bindings. |
 
 Notes:
 
 - Every SQL statement lives once in `crates/tracker-core/sql/query.sql` and
   is looked up by its `-- name:` annotation; the schema is
   `crates/tracker-core/sql/schema.sql`.
-- The TUI and the web UI share one state machine
-  (`crates/tracker-app/src/model.rs`). It never does I/O itself: database
-  reads, syncs, and rating writes are commands (`Cmd`) that `update` returns
-  as data; they run asynchronously and report back as messages.
+- The state machine never does I/O itself (`crates/tracker-app/src/model.rs`,
+  and `web/src/app/model.ts` in the browser): database reads, syncs, and
+  rating writes are commands that `update` returns as data; they run
+  asynchronously and report back as messages.
 - Track artist lists are stored as JSON strings in SQLite and decoded for
   filtering and recommendation logic.
 
 ## Performance
 
-Compared with the TypeScript build it replaced (the Bun binary at
+Compared with the TypeScript build this replaced (the Bun binary at
 `archive/ts`), on the Linux VM (OrbStack, arm64), medians, with the
 methodology of the TypeScript build's own tuning: hyperfine for the CLI, a
 pty driver for the TUI, and `scripts/bench-web` (headless Chromium) for the
 web UI, on a copy of a real 543-track library and on synthetic ones.
 
-| | TypeScript | Rust |
+| | TypeScript | Rust (web client: TypeScript) |
 | --- | ---: | ---: |
-| `tracker version` | 4.8 ms | 0.3 ms |
-| `tracker list recent --limit 50` | 6.0 ms | 0.7 ms |
-| `tracker recommend profile` (543 / 100,000 tracks) | 11.6 / 219 ms | 1.4 / 104 ms |
-| Peak memory, `recommend profile` at 100,000 tracks | 195 MiB | 50 MiB |
-| `tracker tui` launch to the list (543 / 25,000 tracks) | 53 / 64 ms | 8 / 48 ms |
-| TUI `j` to the redrawn frame | 2.5 ms | 0.8 ms |
-| TUI re-sort at 25,000 tracks | 16.8 ms | 7.6 ms |
-| `tracker web` server ready (543 / 25,000 tracks) | 34 / 72 ms | 10 / 49 ms |
-| Web: cold load to interactive (543 / 25,000) | 54 / 53 ms | 45 / 47 ms |
-| Web: warm reload to interactive (543 / 25,000) | 43 / 47 ms | 53 / 49 ms |
-| Web: `j` to the next frame (543 / 25,000) | 12.5 / 13.0 ms | 11.8 / 12.2 ms |
-| Web: server memory after interactions (543 / 25,000) | 74 / 116 MiB | 25 / 72 MiB |
-| Web: cold transfer | 84 KiB | 200 KiB |
-| Web: last tab closed to exit at 25,000 tracks | 3,044 ms | 3,033 ms |
-| Binary size | 91.5 MiB | 11 MiB |
+| `tracker version` | 5.0 ms | 0.3 ms |
+| `tracker list recent --limit 50` | 5.5 ms | 0.7 ms |
+| `tracker recommend profile` (543 / 100,000 tracks) | 10.4 / 224 ms | 1.3 / 108 ms |
+| Peak memory, `recommend profile` at 100,000 tracks | 198 MiB | 50 MiB |
+| `tracker tui` launch to the list (543 / 25,000 tracks) | 43 / 59 ms | 8 / 39 ms |
+| TUI `j` to the redrawn frame | 3.1 ms | 0.9 ms |
+| TUI re-sort at 25,000 tracks | 12.5 ms | 6.1 ms |
+| `tracker web` server ready (543 / 25,000 tracks) | 34 / 65 ms | 11 / 49 ms |
+| Web: cold load to interactive (543 / 25,000) | 54 / 54 ms | 41 / 40 ms |
+| Web: warm reload to interactive (543 / 25,000) | 40 / 45 ms | 33 / 36 ms |
+| Web: `j` to the next frame (543 / 25,000) | 6.2 / 5.1 ms | 4.9 / 5.3 ms |
+| Web: server memory after interactions (543 / 25,000) | 66 / 117 MiB | 25 / 70 MiB |
+| Web: cold transfer | 84 KiB | 33 KiB |
+| Web: last tab closed to exit at 25,000 tracks | 3,037 ms | 3,030 ms |
+| Binary size | 91.5 MiB | 8.8 MiB |
 
-The one place the TypeScript build stays ahead is a warm reload: its
-JavaScript runs from V8's code cache as soon as the page is parsed, while
-the WebAssembly client is fetched (from the HTTP cache), instantiated, and
-then hydrates the page. Most of the client's transfer is the WebAssembly
-(555 KB, 176 KiB with brotli). The VM's absolute timings drift by a few
-milliseconds between runs; each comparison above comes from one run with
-the builds interleaved.
+The browser client went through two designs. Rust compiled to WebAssembly
+(Leptos) loaded faster than the TypeScript build cold, but was 3 to 10 ms
+slower on a warm reload: the module is fetched, instantiated, and only then
+hydrates, after the page is parsed. The client is now TypeScript on Preact
+(18 KiB with brotli) against the Rust server, which is ahead on both.
+
+Key latencies measured to the next frame are quantized by the browser's
+frame timing; for keys pressed only a few times per run (g, G, a star
+digit) two identical builds differ by 2 to 3 ms, so differences of that
+size are noise. Measured over 240 presses, g/G take 5.2 ms against 5.6 ms
+(543 tracks) and 4.3 ms against 4.6 ms (25,000). The VM's absolute timings
+drift between runs; each comparison comes from one run with the builds
+interleaved.
 
 ## History
 
 The tracker was first written in Go (Cobra, Bubble Tea, sqlc), then ported
-to TypeScript, which replaced it, and then to Rust, which replaced that.
-Every port kept the same config file, database, paths, and
+to TypeScript, which replaced it, and then to Rust, which replaced that
+(its browser client is TypeScript on Preact). Every port kept the same config file, database, paths, and
 `artwork-cache.json`, so the builds can be used interchangeably. The Rust
 build's output matches the Go build byte for byte for every read-only
 command checked, and its TUI screens match Go's goldens. Known differences

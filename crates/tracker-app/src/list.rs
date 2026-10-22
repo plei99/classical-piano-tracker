@@ -1,34 +1,18 @@
-//! The list the model browses. The model needs only a count, a row lookup,
-//! and an index-of-track; how the rows get there differs per front end:
+//! The list the model browses: a count, a row lookup, and an index-of-track.
+//! The terminal's [`LocalTracks`] holds the whole library in memory and
+//! sorts and filters it synchronously, so every frame shows a finished list;
+//! the web server's first render of a page browses the window it sends
+//! (tracker-web's `page`).
 //!
-//! - [`LocalTracks`] (the terminal) holds the whole library in memory and
-//!   sorts and filters it synchronously, so every frame shows a finished
-//!   list.
-//! - [`crate::remote::RemoteTracks`] (the browser) holds a window of rows
-//!   that `tracker web` sorted and filtered; changing the order or the query
-//!   is a fetch.
-//!
-//! Both order and filter rows with [`sort_by_mode`] and [`search_needle`],
-//! and so does the web server, so the three always agree.
+//! The terminal and the web server order and filter rows with
+//! [`sort_by_mode`] and [`search_needle`] (and the web client receives what
+//! the server sorted), so both front ends always agree.
 
 use std::collections::HashMap;
 
 use tracker_core::{Rating, Track};
 
-use crate::api::ViewResponse;
-use crate::model::{Cmd, SortMode, TrackRow, TracksLoaded};
-use crate::remote::{ViewOutcome, ViewRequest};
-
-/// What [`TrackList::refresh`] did.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Refresh {
-    /// The list now shows the new order and filter; the selected track's
-    /// new index, if it still matches.
-    Done(Option<usize>),
-    /// The list fetches the new order and filter; the answer arrives as a
-    /// message.
-    Pending(Cmd),
-}
+use crate::model::{SortMode, TrackRow, TracksLoaded};
 
 /// The rows the model browses, in display order.
 pub trait TrackList {
@@ -51,48 +35,16 @@ pub trait TrackList {
     /// Where a loaded track is in display order.
     fn index_of(&self, track_id: i64) -> Option<usize>;
 
-    /// Orders and filters the rows for `sort` and `query`, keeping track
-    /// `selected` when it still matches.
-    fn refresh(&mut self, sort: SortMode, query: &str, selected: i64) -> Refresh;
-
-    /// The command that loads the library, re-reading the database first
-    /// when `reread` is set.
-    fn load(&mut self, reread: bool, sort: SortMode, query: &str, selected: i64) -> Cmd;
+    /// Orders and filters the rows for `sort` and `query`; the new index of
+    /// track `selected`, when it still matches.
+    fn refresh(&mut self, sort: SortMode, query: &str, selected: i64) -> Option<usize>;
 
     /// Records a saved rating for `track_id`. Returns whether the list must
     /// be refreshed to stay correct.
     fn rating_saved(&mut self, track_id: i64, rating: Rating, sort: SortMode) -> bool;
 
-    /// The order and query the rows reflect, when they can lag behind the
-    /// model's (a fetch in flight). `None` means always the model's.
-    fn applied(&self) -> Option<(SortMode, &str)> {
-        None
-    }
-
-    /// Makes row `index` available; `None` when it already is or is on
-    /// its way.
-    fn fetch(&mut self, _index: usize) -> Option<Cmd> {
-        None
-    }
-
     /// A whole library read from the database.
     fn tracks_loaded(&mut self, _loaded: TracksLoaded) {}
-
-    /// A fetched window; `selected` is the track selected now.
-    fn view_loaded(
-        &mut self,
-        _request: &ViewRequest,
-        _result: anyhow::Result<ViewResponse>,
-        _selected: i64,
-    ) -> ViewOutcome {
-        ViewOutcome::Stale
-    }
-
-    /// Rows `first..last` are on screen: the fetch that keeps rows ahead of
-    /// them loaded, if one is due.
-    fn viewport(&mut self, _first: usize, _last: usize) -> Option<Cmd> {
-        None
-    }
 }
 
 /// Sorts `items` into `mode`'s order. Every order ends with the track ID, so
@@ -187,16 +139,12 @@ impl TrackList for LocalTracks {
         self.tracks.iter().position(|&index| self.all_tracks[index].track.id == track_id)
     }
 
-    fn refresh(&mut self, sort: SortMode, query: &str, selected: i64) -> Refresh {
+    fn refresh(&mut self, sort: SortMode, query: &str, selected: i64) -> Option<usize> {
         if !self.sorted || self.sorted_by != sort {
             self.sort(sort);
         }
         self.filter(query);
-        Refresh::Done(self.index_of(selected))
-    }
-
-    fn load(&mut self, _reread: bool, _sort: SortMode, _query: &str, _selected: i64) -> Cmd {
-        Cmd::LoadTracks
+        self.index_of(selected)
     }
 
     fn rating_saved(&mut self, track_id: i64, rating: Rating, sort: SortMode) -> bool {

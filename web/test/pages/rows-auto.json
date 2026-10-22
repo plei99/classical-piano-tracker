@@ -1,0 +1,77 @@
+{
+  "theme": "auto",
+  "initial": {
+    "view": {
+      "version": 1,
+      "total": 543,
+      "matched": 543,
+      "offset": 0,
+      "rows": [
+        {
+          "track": {
+            "id": 87,
+            "spotifyId": "sp00000000000000000087",
+            "trackName": "Keyboard Partita No. 2 in C Minor, BWV 826: I. Sinfonia",
+            "albumName": "Bach: Partitas & Toccatas",
+            "artists": "[\"Johann Sebastian Bach\", \"Martha Argerich\"]",
+            "playCount": 8,
+            "lastPlayedAt": 1787456026,
+            "createdAt": 1
+          },
+          "rating": {
+            "trackId": 87,
+            "stars": 4,
+            "opinion": "Crisp <attack> & \"singing\" line\nsecond line",
+            "updatedAt": 1787456100
+          },
+          "artists": "Johann Sebastian Bach, Martha Argerich",
+          "art": {
+            "small": "https://i.scdn.co/image/small-1",
+            "medium": "https://i.scdn.co/image/medium-1",
+            "large": "https://i.scdn.co/image/large-1"
+          }
+        },
+        {
+          "track": {
+            "id": 284,
+            "spotifyId": "sp00000000000000000284",
+            "trackName": "Gaspard de la nuit, M. 55: III. Scarbo",
+            "albumName": "Ravel: Gaspard",
+            "artists": "[\"Maurice Ravel\", \"Martha Argerich\"]",
+            "playCount": 5,
+            "lastPlayedAt": 1787455963,
+            "createdAt": 1
+          },
+          "rating": null,
+          "artists": "Maurice Ravel, Martha Argerich",
+          "art": null
+        },
+        {
+          "track": {
+            "id": 19,
+            "spotifyId": "sp00000000000000000019",
+            "trackName": "Études d'exécution transcendante, S. 139: No. 1, Prélude",
+            "albumName": "Études",
+            "artists": "[\"Franz Liszt\", \"Víkingur Ólafsson\"]",
+            "playCount": 6,
+            "lastPlayedAt": 1785000000,
+            "createdAt": 1
+          },
+          "rating": {
+            "trackId": 19,
+            "stars": 5,
+            "opinion": "",
+            "updatedAt": 1
+          },
+          "artists": "Franz Liszt, Víkingur Ólafsson",
+          "art": {
+            "small": null,
+            "medium": "https://i.scdn.co/image/m-19",
+            "large": null
+          }
+        }
+      ],
+      "index": null
+    }
+  }
+}

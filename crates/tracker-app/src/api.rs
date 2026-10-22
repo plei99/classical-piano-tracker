@@ -1,7 +1,7 @@
-//! The HTTP contract between `tracker web`'s local server and the browser
-//! client. Both sides use these types, so a shape change breaks the build
-//! rather than the page. The routes and JSON match the TypeScript build's
-//! `web/api.ts`, so either build's client works against either server.
+//! The HTTP contract between `tracker web`'s local server and its browser
+//! client (web/, TypeScript). The client's types and constants are generated
+//! from these (see the `bindings` test below), so a shape change breaks the
+//! build rather than the page.
 //!
 //! Security model: the server binds 127.0.0.1 only and rejects requests
 //! whose Host header is not the address it serves (blocks DNS rebinding).
@@ -21,12 +21,10 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracker_core::{Rating, Track};
 
-use crate::model::SortMode;
-
 pub const TOKEN_HEADER: &str = "X-Tracker-Token";
 pub const TOKEN_META: &str = "tracker-token";
 
-/// GET ?sort=<[`SortMode::param`]>&q=<query>&offset=<n>&limit=<n>[&around=<track ID>]
+/// GET ?sort=<[`crate::model::SortMode::param`]>&q=<query>&offset=<n>&limit=<n>[&around=<track ID>]
 /// -> [`ViewResponse`]: one window of the library, sorted and filtered
 /// exactly as the terminal UI does. With `around`, the window is centered on
 /// that track when it matches (and `offset` is ignored).
@@ -53,11 +51,16 @@ pub const ARTWORK_BATCH: usize = 50;
 /// The most rows one [`VIEW_PATH`] request returns.
 pub const MAX_VIEW_LIMIT: usize = 500;
 
+/// Rows per window the page asks for, and that `GET /` sends: about six
+/// screens of the list pane.
+pub const VIEW_CHUNK: usize = 100;
+
 /// The `<script type="application/json">` element in the server-rendered
 /// page that holds the [`InitialState`] the page was rendered from.
 pub const INITIAL_STATE_ID: &str = "tracker-initial";
 
 /// One window of the sorted, filtered library.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewResponse {
     /// Increases whenever the library or a rating changes; rows from an
@@ -76,6 +79,7 @@ pub struct ViewResponse {
 }
 
 /// One track as the list and the detail pane show it.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Row {
     pub track: Track,
@@ -84,16 +88,26 @@ pub struct Row {
     pub artists: String,
     /// Present only when the server already knows the track's art; `null`
     /// means it has none.
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "present")]
+    #[cfg_attr(test, ts(as = "Option<Option<Artwork>>", optional))]
     pub art: Option<Option<Artwork>>,
 }
 
 /// Tells a field that is `null` (`Some(None)`) from one that is absent
 /// (`None`, through `#[serde(default)]`).
-fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> Result<Option<T>, D::Error> {
-    T::deserialize(deserializer).map(Some)
+mod present {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer, T: Serialize>(value: &Option<T>, serializer: S) -> Result<S::Ok, S::Error> {
+        value.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> Result<Option<T>, D::Error> {
+        T::deserialize(deserializer).map(Some)
+    }
 }
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReloadResponse {
     pub version: u64,
@@ -103,6 +117,7 @@ pub struct ReloadResponse {
 /// What the server rendered the page from: the first window of the default
 /// view, or why the library could not be read. `view` and `error` are both
 /// absent while the library is still loading.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InitialState {
     pub view: Option<ViewResponse>,
@@ -131,31 +146,8 @@ impl InitialState {
     }
 }
 
-/// The URL of one [`VIEW_PATH`] request.
-pub fn view_url(sort: SortMode, query: &str, offset: usize, limit: usize, around: Option<i64>) -> String {
-    let mut url =
-        format!("{VIEW_PATH}?sort={}&q={}&offset={offset}&limit={limit}", sort.param(), encode_uri_component(query));
-    if let Some(around) = around {
-        url.push_str(&format!("&around={around}"));
-    }
-    url
-}
-
-/// JavaScript's `encodeURIComponent`.
-pub fn encode_uri_component(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => {
-                encoded.push(char::from(byte))
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
-}
-
 /// Album art in Spotify's three sizes; any can be missing.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Artwork {
     /// ~64 px, for list rows.
@@ -181,6 +173,7 @@ impl Artwork {
 /// Art keyed by Spotify track ID, in request order; `None` when the track
 /// has no art or could not be looked up. A JSON object on the wire.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(export, as = "std::collections::HashMap<String, Option<Artwork>>"))]
 pub struct ArtworkResponse(pub Vec<(String, Option<Artwork>)>);
 
 impl Serialize for ArtworkResponse {
@@ -218,6 +211,7 @@ impl<'de> Deserialize<'de> for ArtworkResponse {
 }
 
 /// Every non-2xx response has this body.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorResponse {
     pub error: String,
@@ -356,19 +350,6 @@ mod tests {
     }
 
     #[test]
-    fn view_urls_name_the_sort_and_encode_the_query() {
-        assert_eq!(view_url(SortMode::RecentDesc, "", 0, 100, None), "/api/view?sort=recentDesc&q=&offset=0&limit=100");
-        assert_eq!(
-            view_url(SortMode::UnratedFirst, "a b&c/é", 200, 50, Some(42)),
-            "/api/view?sort=unratedFirst&q=a%20b%26c%2F%C3%A9&offset=200&limit=50&around=42"
-        );
-        for mode in [SortMode::RecentDesc, SortMode::IdAsc, SortMode::TopPlayed, SortMode::UnratedFirst] {
-            assert_eq!(SortMode::from_param(mode.param()), Some(mode));
-        }
-        assert_eq!(SortMode::from_param("recent"), None);
-    }
-
-    #[test]
     fn artwork_response_is_an_ordered_object() {
         let art = Artwork { small: Some("s".into()), medium: None, large: Some("l".into()) };
         let response = ArtworkResponse(vec![("b".into(), Some(art.clone())), ("a".into(), None)]);
@@ -391,5 +372,64 @@ mod tests {
         for theme in Theme::ALL {
             assert_eq!(Theme::parse(theme.as_str()), theme);
         }
+    }
+}
+
+/// The web client's TypeScript bindings (`web/src/generated`): ts-rs writes
+/// a file per type above when the tests run, and this test writes the
+/// constants. `make check` fails when the committed files are stale, and the
+/// client is type-checked against them, so the two sides cannot drift.
+#[cfg(test)]
+mod bindings {
+    use std::fmt::Write as _;
+
+    use ts_rs::TS;
+
+    use super::*;
+    use crate::model::SortMode;
+
+    #[test]
+    fn export_request_types_and_constants() {
+        // Only requests and responses no exported type mentions.
+        let config = ts_rs::Config::from_env();
+        tracker_core::UpsertRatingParams::export_all(&config).unwrap();
+        tracker_core::SyncStats::export_all(&config).unwrap();
+
+        let quoted = |values: &mut dyn Iterator<Item = &str>| {
+            values.map(|value| format!("'{value}'")).collect::<Vec<_>>().join(", ")
+        };
+        let mut out = String::from(
+            "// This file was generated by tracker-app's tests (crates/tracker-app/src/api.rs). Do not edit this file manually.\n",
+        );
+        for (name, value) in [
+            ("TOKEN_HEADER", TOKEN_HEADER),
+            ("TOKEN_META", TOKEN_META),
+            ("PRESENCE_TOKEN_PARAM", PRESENCE_TOKEN_PARAM),
+            ("INITIAL_DATA_ID", INITIAL_STATE_ID),
+            ("THEME_COOKIE", THEME_COOKIE),
+        ] {
+            writeln!(out, "export const {name} = '{value}';").unwrap();
+        }
+        writeln!(
+            out,
+            "export const API = {{ view: '{VIEW_PATH}', reload: '{RELOAD_PATH}', sync: '{SYNC_PATH}', ratings: '{RATINGS_PATH}', artwork: '{ARTWORK_PATH}', presence: '{PRESENCE_PATH}' }} as const;"
+        )
+        .unwrap();
+        writeln!(out, "export const ARTWORK_BATCH = {ARTWORK_BATCH};").unwrap();
+        writeln!(out, "export const VIEW_LIMIT_MAX = {MAX_VIEW_LIMIT};").unwrap();
+        writeln!(out, "export const VIEW_CHUNK = {VIEW_CHUNK};").unwrap();
+        writeln!(
+            out,
+            "export const SORT_MODES = [{}] as const;",
+            quoted(&mut SortMode::ALL.into_iter().map(SortMode::param))
+        )
+        .unwrap();
+        writeln!(out, "export type SortMode = (typeof SORT_MODES)[number];").unwrap();
+        writeln!(out, "export const THEMES = [{}] as const;", quoted(&mut Theme::ALL.into_iter().map(Theme::as_str)))
+            .unwrap();
+        writeln!(out, "export type ThemeChoice = (typeof THEMES)[number];").unwrap();
+
+        let dir = std::env::var("TS_RS_EXPORT_DIR").expect("set in .cargo/config.toml");
+        std::fs::write(std::path::Path::new(&dir).join("constants.ts"), out).unwrap();
     }
 }

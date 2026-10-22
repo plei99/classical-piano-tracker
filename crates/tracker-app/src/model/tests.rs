@@ -27,10 +27,6 @@ pub(crate) fn loaded() -> Model {
     model
 }
 
-fn ids(model: &Model) -> Vec<i64> {
-    model.visible_rows().map(|row| row.track.id).collect()
-}
-
 #[test]
 fn commands_are_data() {
     let mut model = Model::new(Services::ALL);
@@ -55,73 +51,6 @@ fn commands_are_data() {
     assert_eq!((params.track_id, params.stars, params.opinion.as_str()), (1, 4, "Op. 9"));
     assert!(params.updated_at > 1_700_000_000, "saves are stamped with the current time");
     assert!(model.saving_rating);
-}
-
-#[test]
-fn select_moves_to_a_track_by_id_and_ignores_unknown_ids() {
-    let mut model = loaded();
-    model.status_message = "old".into();
-    assert!(model.update(Msg::Select { track_id: 3 }).is_none());
-    assert_eq!(model.selected_index, 2);
-    assert_eq!(model.status_message, "", "moving clears the status, like the keys");
-    model.update(Msg::Select { track_id: 99 });
-    assert_eq!(model.selected_index, 2);
-}
-
-#[test]
-fn select_is_ignored_while_busy_or_editing() {
-    for (syncing, saving_rating) in [(true, false), (false, true)] {
-        let mut model = Model { syncing, saving_rating, ..loaded() };
-        model.update(Msg::Select { track_id: 2 });
-        assert_eq!(model.selected_index, 0);
-    }
-    let mut model = loaded();
-    model.start_rating_editor();
-    model.update(Msg::Select { track_id: 2 });
-    assert_eq!(model.selected_index, 0);
-}
-
-#[test]
-fn set_search_filters_and_keeps_a_matching_selection() {
-    let mut model = loaded();
-    model.update(Msg::Select { track_id: 2 });
-    model.update(Msg::SetSearch("track 2".into()));
-    assert_eq!(ids(&model), vec![2]);
-    assert_eq!(model.selected_index, 0);
-    assert_eq!(model.selected_track_id(), 2);
-
-    model.update(Msg::SetSearch(String::new()));
-    assert_eq!(ids(&model), vec![1, 2, 3]);
-    assert_eq!(model.selected_track_id(), 2);
-
-    let mut busy = Model { syncing: true, ..loaded() };
-    busy.update(Msg::SetSearch("track 2".into()));
-    assert_eq!(busy.search_query, "");
-}
-
-#[test]
-fn editor_fields_only_change_while_editing() {
-    let mut model = loaded();
-    model.update(Msg::SetDraftStars(3));
-    model.update(Msg::SetDraftOpinion("ignored".into()));
-    model.update(Msg::FocusField(EditorField::Opinion));
-    assert_eq!((model.draft_stars, model.draft_opinion.as_str(), model.editing_opinion), (0, "", false));
-
-    model.start_rating_editor();
-    model.update(Msg::SetDraftStars(4));
-    assert_eq!(model.draft_stars, 4);
-    model.update(Msg::SetDraftStars(6));
-    model.update(Msg::SetDraftStars(-1));
-    assert_eq!(model.draft_stars, 4, "stars stay within 0-5");
-    model.update(Msg::SetDraftStars(0));
-    assert_eq!(model.draft_stars, 0);
-
-    model.update(Msg::SetDraftOpinion("Op. 9".into()));
-    assert_eq!((model.draft_opinion.as_str(), model.editing_opinion), ("Op. 9", true));
-    model.update(Msg::FocusField(EditorField::Stars));
-    assert!(!model.editing_opinion);
-    model.update(Msg::FocusField(EditorField::Opinion));
-    assert!(model.editing_opinion);
 }
 
 #[test]
@@ -166,6 +95,4 @@ fn format_time_matches_strftime() {
             assert_eq!(model.format_time(second), want, "{second} in {zone:?}");
         }
     }
-    let browser = Model { time_zone: Zone::Offset(|_| -(4 * 3600)), ..Model::new(Services::ALL) };
-    assert_eq!(browser.format_time(0), "1969-12-31T20:00:00-04:00");
 }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use tracker_app::list::{LocalTracks, Refresh, TrackList};
+use tracker_app::list::{LocalTracks, TrackList};
 
 use super::*;
 
@@ -40,7 +40,7 @@ fn terminal_ids(sort: SortMode, search: &str) -> Vec<i64> {
     let loaded = TracksLoaded::new(tracks, ratings);
     let ratings: HashMap<i64, Rating> = loaded.ratings;
     let mut list = LocalTracks::new(loaded.rows, ratings);
-    assert!(matches!(list.refresh(sort, search, 0), Refresh::Done(_)));
+    list.refresh(sort, search, 0);
     (0..list.len()).map(|index| list.row(index).unwrap().track.id).collect()
 }
 

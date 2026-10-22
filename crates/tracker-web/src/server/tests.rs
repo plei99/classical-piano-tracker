@@ -997,16 +997,16 @@ async fn renders_the_first_screen_and_the_state_it_came_from() {
     assert!(body.contains(r#"<p class="muted">3 loaded · sort: recent</p>"#), "{body}");
     assert!(
         body.contains(&format!(
-            r#"<li id="track-{first}" role="option" aria-selected="true" class="row row--selected""#
+            r#"<li id="track-{first}" role="option" aria-selected="true" style="transform:translateY(0px);" class="row row--selected">"#
         )),
         "{body}"
     );
     assert!(
-        body.contains(r#"<h2 class="hero__title">Gaspard &lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt; &amp; "#),
+        body.contains(r#"<h2 class="hero__title">Gaspard &lt;/script>&lt;script>alert(1)&lt;/script> &amp; "#),
         "{body}"
     );
     assert!(body.contains(r#"src="https://i.scdn.co/image/s1""#), "known art is in the first render: {body}");
-    assert!(body.contains(r#"<input type="radio" name="theme" value="dark" checked>"#), "{body}");
+    assert!(body.contains(r#"<input type="radio" name="theme" value="dark" checked/>"#), "{body}");
     assert!(body.contains(r#"<footer class="footer">"#), "{body}");
     // The data only appears escaped: nothing in it can end the script.
     assert_eq!(body.matches("</script>").count(), 1, "{body}");

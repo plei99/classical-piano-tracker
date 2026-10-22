@@ -1,0 +1,5 @@
+# TypeScript bindings for the web client (web/src/generated), written by the
+# ts-rs export tests in tracker-app; `make check` fails if they are stale.
+[env]
+TS_RS_EXPORT_DIR = { value = "web/src/generated", relative = true }
+TS_RS_LARGE_INT = "number"

@@ -114,7 +114,7 @@ pub fn error_text<L: TrackList>(m: &BrowserModel<L>) -> String {
 }
 
 pub fn no_match_text<L: TrackList>(m: &BrowserModel<L>) -> String {
-    format!("No tracks match /{}", m.shown_query().trim())
+    format!("No tracks match /{}", m.search_query.as_str().trim())
 }
 
 /// The status line above the key help.
@@ -134,9 +134,9 @@ pub fn status<L: TrackList>(m: &BrowserModel<L>) -> Option<Status> {
         let text = if m.status_is_error { format!("Error: {}", m.status_message) } else { m.status_message.clone() };
         (text, m.status_is_error)
     } else if m.searching {
-        (format!("Search /{}_ ({}/{})", m.shown_query(), m.list.len(), m.total_track_count()), false)
-    } else if !m.shown_query().trim().is_empty() {
-        (format!("Filter /{} ({}/{})", m.shown_query().trim(), m.list.len(), m.total_track_count()), false)
+        (format!("Search /{}_ ({}/{})", m.search_query.as_str(), m.list.len(), m.total_track_count()), false)
+    } else if !m.search_query.as_str().trim().is_empty() {
+        (format!("Filter /{} ({}/{})", m.search_query.as_str().trim(), m.list.len(), m.total_track_count()), false)
     } else {
         return None;
     };
@@ -146,8 +146,8 @@ pub fn status<L: TrackList>(m: &BrowserModel<L>) -> Option<Status> {
 /// e.g. "543 loaded · sort: recent", or "12/543 shown · sort: recent" while
 /// filtered.
 pub fn track_list_summary<L: TrackList>(m: &BrowserModel<L>) -> String {
-    let label = m.shown_sort_mode().label();
-    if m.shown_query().trim().is_empty() {
+    let label = m.sort_mode.label();
+    if m.search_query.as_str().trim().is_empty() {
         return format!("{} loaded · sort: {label}", m.list.len());
     }
     format!("{}/{} shown · sort: {label}", m.list.len(), m.total_track_count())

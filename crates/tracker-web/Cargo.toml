@@ -18,7 +18,6 @@ tokio = { version = "1.53.1", features = ["net", "rt", "sync", "time"] }
 tracker-app = { version = "0.1.0", path = "../tracker-app" }
 tracker-core = { version = "0.1.0", path = "../tracker-core" }
 tracker-spotify = { version = "0.1.0", path = "../tracker-spotify" }
-tracker-web-client = { version = "0.1.0", path = "../tracker-web-client", features = ["ssr"] }
 ureq = "3.4.2"
 url = "2.5.8"
 

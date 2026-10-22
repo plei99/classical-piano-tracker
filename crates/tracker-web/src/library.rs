@@ -10,9 +10,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
+use tracker_app::api::VIEW_CHUNK as CHUNK;
 use tracker_app::api::{Artwork, MAX_VIEW_LIMIT, Row, ViewResponse};
 use tracker_app::list::{search_needle, sort_by_mode};
-use tracker_app::remote::CHUNK;
 use tracker_app::{SortMode, TrackRow, TracksLoaded};
 use tracker_core::{Rating, Track};
 use url::Url;

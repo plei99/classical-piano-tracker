@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ORDER = ['ts', 'go', 'rs', 'swift'];
-const ARCH = { ts: 'hybrid (React)', go: 'server-driven', rs: 'hybrid (Leptos/WASM)', swift: 'server-driven' };
+const ARCH = { ts: 'hybrid (React)', go: 'server-driven', rs: 'hybrid (Rust server, Preact)', swift: 'server-driven' };
 
 export function pct(values, p) {
   const s = values.filter((x) => typeof x === 'number' && Number.isFinite(x)).sort((a, b) => a - b);
@@ -300,7 +300,7 @@ const NOTES = `## Reading these numbers
 
 - **Server-driven (go, swift) vs client-side (ts, rs).** In go and swift every key is a POST to the server, which runs the model, renders HTML, and returns it for idiomorph to morph in; latency includes a localhost round trip, server render, and the morph, and each key costs server CPU and bytes on the wire. In ts and rs the model runs in the page, so a key costs no network at all (except saving a rating, which is a POST in every build). Interaction latencies therefore compare whole architectures, not the speed of the four languages.
 - **"Next frame" quantizes.** Headless Chromium paints at 60 Hz, so the frame-based latency is the work plus the wait for the next vsync (0-16.7 ms). Two builds whose work fits inside one frame look the same; the DOM-mutation column shows the difference below a frame.
-- **First row.** go and swift send the first rows in the HTML, so "first row" is essentially HTML parse time; ts and rs (hybrid) also server-render their first screen and then hydrate it once their bundle (and, for rs, the WASM module) has loaded. "Interactive" (the first \`j\` that moves the selection) is the comparable milestone: it needs the script and, for go/swift, the session's first server round trip.
+- **First row.** go and swift send the first rows in the HTML, so "first row" is essentially HTML parse time; ts and rs (hybrid) also server-render their first screen and then hydrate it once their bundle has loaded. "Interactive" (the first \`j\` that moves the selection) is the comparable milestone: it needs the script and, for go/swift, the session's first server round trip.
 - **Interactive probe.** From document start the page dispatches a synthetic \`j\` keydown every 5 ms until the selection moves, so "interactive" has ~5 ms resolution plus the effect's own latency. The probe's extra presses are why cold-load transfer is measured on a separate load without it. Its 5 ms timer also keeps the renderer awake, which makes server round trips during load slightly faster than they would be in an idle page (applies to all builds alike).
 - **Transfer.** Wire bytes including headers, from the DevTools protocol. SSE is the bytes received on the event stream up to the end of the sample. All four builds window the list on the server: go and swift send rendered HTML for the rows in view, while ts and rs (hybrid) server-render the first screen and then fetch windows of rows from \`/api/view\` as needed, so no build's transfer grows with the library.
 - **Server memory/CPU.** go and swift keep one session (model + rendered state) per tab for 60 s after it disconnects, so RSS after the page-load phase includes up to ~11 abandoned sessions. CPU per page load is (CPU after loads - idle CPU) / loads, from \`ps\` (10 ms resolution).

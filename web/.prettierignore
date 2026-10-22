@@ -1,0 +1,6 @@
+# Generated from the Rust types (cargo test).
+src/generated
+# Goldens of the client's render, compared byte for byte.
+test/pages/*.html
+node_modules
+dist

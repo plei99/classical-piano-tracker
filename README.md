@@ -703,32 +703,37 @@ Notes:
 
 ## Performance
 
-Measured on an Apple Silicon Mac against a copy of a real database (543
-tracks), medians including process start: `tracker version` about 3 ms,
-`tracker list recent --limit 50` about 4 ms, `tracker recommend profile`
-about 4 ms, `tracker tui` to its first list frame about 12 ms, and under
-1 ms from a TUI keypress to the redraw. The release binary is about 11 MB,
-1.7 MB of which is the embedded web client.
+Compared with the TypeScript build it replaced (the Bun binary at
+`archive/ts`), on the Linux VM (OrbStack, arm64), medians, with the
+methodology of the TypeScript build's own tuning: hyperfine for the CLI, a
+pty driver for the TUI, and `scripts/bench-web` (headless Chromium) for the
+web UI, on a copy of a real 543-track library and on synthetic ones.
 
-The web UI, measured with `scripts/bench-web` (headless Chromium, requests
-outside 127.0.0.1 blocked; the machine had unrelated background load, so
-these are upper bounds; key latencies are keydown to the DOM change):
+| | TypeScript | Rust |
+| --- | ---: | ---: |
+| `tracker version` | 4.8 ms | 0.3 ms |
+| `tracker list recent --limit 50` | 6.0 ms | 0.7 ms |
+| `tracker recommend profile` (543 / 100,000 tracks) | 11.6 / 219 ms | 1.4 / 104 ms |
+| Peak memory, `recommend profile` at 100,000 tracks | 195 MiB | 50 MiB |
+| `tracker tui` launch to the list (543 / 25,000 tracks) | 53 / 64 ms | 8 / 48 ms |
+| TUI `j` to the redrawn frame | 2.5 ms | 0.8 ms |
+| TUI re-sort at 25,000 tracks | 16.8 ms | 7.6 ms |
+| `tracker web` server ready (543 / 25,000 tracks) | 34 / 72 ms | 10 / 49 ms |
+| Web: cold load to interactive (543 / 25,000) | 54 / 53 ms | 45 / 47 ms |
+| Web: warm reload to interactive (543 / 25,000) | 43 / 47 ms | 53 / 49 ms |
+| Web: `j` to the next frame (543 / 25,000) | 12.5 / 13.0 ms | 11.8 / 12.2 ms |
+| Web: server memory after interactions (543 / 25,000) | 74 / 116 MiB | 25 / 72 MiB |
+| Web: cold transfer | 84 KiB | 200 KiB |
+| Web: last tab closed to exit at 25,000 tracks | 3,044 ms | 3,033 ms |
+| Binary size | 91.5 MiB | 11 MiB |
 
-|                                  | 543 tracks (real data) | 25,000 tracks (synthetic) |
-| -------------------------------- | ---------------------: | ------------------------: |
-| Server ready                     |                  11 ms |                     64 ms |
-| First row on screen              |                   9 ms |                      9 ms |
-| Cold / warm load to interactive  |             79 / 30 ms |                67 / 30 ms |
-| Cold / warm reload transfer      |           302 / 12 KiB |                   304 KiB |
-| `j` / `G`                        |           1.2 / 2.2 ms |              1.3 / 2.2 ms |
-| Sort / search keystroke          |           5.7 / 6.3 ms |           4.9 ms (sort) |
-| Server memory after interactions |                 24 MiB |                    66 MiB |
-| Tab closed to process exit       |                  3.0 s |                     3.0 s |
-
-Moving through the list never leaves the page; sorting and searching are a
-localhost round trip, most of which is the browser scheduling the response.
-A cold load is about 300 KiB on the wire at any library size, 279 KiB of it
-the WebAssembly client.
+The one place the TypeScript build stays ahead is a warm reload: its
+JavaScript runs from V8's code cache as soon as the page is parsed, while
+the WebAssembly client is fetched (from the HTTP cache), instantiated, and
+then hydrates the page. Most of the client's transfer is the WebAssembly
+(555 KB, 176 KiB with brotli). The VM's absolute timings drift by a few
+milliseconds between runs; each comparison above comes from one run with
+the builds interleaved.
 
 ## History
 

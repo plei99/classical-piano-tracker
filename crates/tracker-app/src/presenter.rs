@@ -18,6 +18,8 @@ pub const TRACKS_HEADING: &str = "Tracks";
 pub const DETAILS_HEADING: &str = "Track Details";
 pub const EDITOR_HEADING: &str = "Rating Editor";
 pub const NO_SELECTION_TEXT: &str = "No track selected.";
+/// The web details pane while the selected row is on its way.
+pub const LOADING_DETAILS_TEXT: &str = "Loading...";
 pub const RATING_NONE_TEXT: &str = "Rating: none";
 pub const RATING_SAVING_TEXT: &str = "Rating: saving...";
 pub const OPINION_LABEL: &str = "Opinion:";

@@ -468,15 +468,17 @@ async fn rejects_bad_view_parameters() {
 #[tokio::test]
 async fn reload_requires_the_token_and_reports_failures() {
     let h = harness().await;
-    h.first_read().await;
+    let before = h.first_read().await;
     assert_eq!(h.call("POST", RELOAD_PATH, &[], "").await.status, 403);
     h.db.conn().execute_batch("DROP TABLE ratings").unwrap();
     let reply = h.post(RELOAD_PATH, &json!(null)).await;
     assert_eq!(reply.status, 500);
+    assert_eq!(reply.header("vary"), None, "errors are sent as they are");
     let error = reply.json()["error"].as_str().unwrap().to_string();
     assert!(error.contains("ratings"), "{error}");
+    // The library pages already have stays.
     let view = h.get(VIEW).await;
-    assert_eq!((view.status, view.json()), (500, json!({ "error": error })));
+    assert_eq!((view.status, view.json()), (200, before));
 }
 
 #[tokio::test]
@@ -952,10 +954,14 @@ async fn never_compresses_the_presence_stream() {
 
 // ---- The server-rendered page ----
 
-async fn ssr_harness() -> Harness {
+fn ssr_assets() -> Assets {
     let mut assets = assets();
     assets.insert("/".into(), Asset::new("text/html; charset=utf-8", Bytes::from_static(SSR_TEMPLATE.as_bytes())));
-    harness_on(Arc::new(Db::open_in_memory().unwrap()), Arc::new(|| Ok(SyncStats::default())), assets).await
+    assets
+}
+
+async fn ssr_harness() -> Harness {
+    harness_on(Arc::new(Db::open_in_memory().unwrap()), Arc::new(|| Ok(SyncStats::default())), ssr_assets()).await
 }
 
 /// The `{"view": ...}` the page was rendered from.
@@ -1021,16 +1027,23 @@ async fn renders_the_first_screen_and_the_state_it_came_from() {
 
 #[tokio::test]
 async fn renders_the_error_screen_when_the_library_cannot_be_read() {
-    let h = ssr_harness().await;
-    h.first_read().await;
-    h.db.conn().execute_batch("DROP TABLE tracks").unwrap();
-    assert_eq!(h.post(RELOAD_PATH, &json!(null)).await.status, 500);
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    db.conn().execute_batch("ALTER TABLE tracks RENAME TO hidden").unwrap();
+    let h = harness_on(db, Arc::new(|| Ok(SyncStats::default())), ssr_assets()).await;
     let page = h.get("/").await.body;
     let error = initial_json(&page)["error"].as_str().unwrap().to_string();
     assert!(error.contains("tracks"), "{error}");
     assert_eq!(initial_json(&page)["view"], Value::Null);
     assert!(page.contains(r#"<p class="error">Error: "#), "{page}");
     assert!(page.contains(">Retry</button>"), "{page}");
+    let view = h.get(VIEW).await;
+    assert_eq!(view.status, 500);
+
+    // Until a read works, every request reads the database again.
+    h.db.conn().execute_batch("ALTER TABLE hidden RENAME TO tracks").unwrap();
+    let page = h.get("/").await.body;
+    assert_eq!(initial_json(&page)["error"], Value::Null, "{page}");
+    assert_eq!(initial_json(&page)["view"]["total"], 0);
 }
 
 #[tokio::test]

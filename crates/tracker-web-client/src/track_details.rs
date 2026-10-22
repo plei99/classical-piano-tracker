@@ -1,8 +1,9 @@
+use leptos::either::Either;
 use leptos::prelude::*;
 use tracker_app::presenter::{
-    self, DETAILS_HEADING, NO_SELECTION_TEXT, RATING_NONE_TEXT, RATING_SAVING_TEXT, RatingView,
+    self, DETAILS_HEADING, LOADING_DETAILS_TEXT, NO_SELECTION_TEXT, RATING_NONE_TEXT, RATING_SAVING_TEXT, RatingView,
 };
-use tracker_app::{KeyPress, Msg, WebModel};
+use tracker_app::{KeyPress, Msg, TrackList as _, WebModel};
 
 use crate::artwork::ArtworkStore;
 use crate::cover::{Cover, CoverSize};
@@ -175,15 +176,35 @@ pub fn TrackDetails(model: RwSignal<WebModel>, send: Callback<Msg>, player: Play
         }
     };
 
+    let has_rows = Memo::new(move |_| model.with(|m| !m.list.is_empty()));
     view! {
         <Show
             when=move || has_selection.get()
-            fallback=|| {
-                view! {
-                    <section class="pane pane--detail" aria-label="Track details">
-                        <h2>{DETAILS_HEADING}</h2>
-                        <p class="muted">{NO_SELECTION_TEXT}</p>
-                    </section>
+            fallback=move || {
+                if has_rows.get() {
+                    // The selected row is still on its way (a jump to the end
+                    // of a long list).
+                    Either::Left(
+                        view! {
+                            <section class="pane pane--detail" aria-label="Track details" aria-busy="true">
+                                <div class="hero">
+                                    <div class="cover cover--large cover--empty hero__cover" aria-hidden="true"></div>
+                                    <div class="hero__text">
+                                        <h2 class="hero__title muted">{LOADING_DETAILS_TEXT}</h2>
+                                    </div>
+                                </div>
+                            </section>
+                        },
+                    )
+                } else {
+                    Either::Right(
+                        view! {
+                            <section class="pane pane--detail" aria-label="Track details">
+                                <h2>{DETAILS_HEADING}</h2>
+                                <p class="muted">{NO_SELECTION_TEXT}</p>
+                            </section>
+                        },
+                    )
                 }
             }
         >

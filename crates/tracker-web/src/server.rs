@@ -267,7 +267,8 @@ enum LibraryState {
     /// The first read has not finished.
     Loading,
     Ready(Arc<Library>),
-    /// The last read failed; pages show the error until a reload works.
+    /// The last read failed. Every request that needs the library reads the
+    /// database again (and reports the error if it fails again).
     Failed(String),
 }
 
@@ -344,7 +345,7 @@ pub async fn start(options: WebServerOptions) -> io::Result<WebServer> {
         closing: closing_rx,
     });
     // The first read starts at once, so the page rarely waits for it.
-    tokio::spawn(reload(Arc::clone(&app)));
+    tokio::spawn(reload(Arc::clone(&app), Keep::Nothing));
     let router = Router::new().fallback(handle).with_state(app);
     let (stop, stopped) = oneshot::channel::<()>();
     let task = tokio::spawn(async move {
@@ -385,6 +386,10 @@ async fn handle(State(app): State<Arc<App>>, request: Request) -> Response {
 /// as the client allows. Streams (presence) and already encoded bodies
 /// (precompressed assets) pass through.
 async fn compressed(response: Response, encoding: Option<Encoding>) -> Response {
+    // Errors go out as they are, without `Vary`.
+    if !response.status().is_success() {
+        return response;
+    }
     let headers = response.headers();
     let content_type = headers.get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or_default();
     let size = http_body::Body::size_hint(response.body()).exact();
@@ -444,7 +449,8 @@ async fn route(
             VIEW_PATH => json(&view(app, url).await?),
             RELOAD_PATH => {
                 read_body(request).await?;
-                let library = reload(Arc::clone(app)).await?;
+                // A failed re-read keeps serving the library pages have.
+                let library = reload(Arc::clone(app), Keep::Library).await?;
                 json(&ReloadResponse { version: library.version(), total: library.total() })
             }
             SYNC_PATH => {
@@ -490,7 +496,7 @@ async fn route(
 /// placeholders (the embedded client does), the first screen rendered on
 /// the server plus the state it was rendered from, for the client to
 /// hydrate.
-async fn page(app: &App, template: &str, theme: Theme) -> String {
+async fn page(app: &Arc<App>, template: &str, theme: Theme) -> String {
     // Substituted first, so nothing from the library can be taken for them.
     let page = template.replace(TOKEN_PLACEHOLDER, &app.token).replace(THEME_PLACEHOLDER, theme.as_str());
     if !page.contains(APP_PLACEHOLDER) && !page.contains(INITIAL_PLACEHOLDER) {
@@ -505,7 +511,7 @@ async fn page(app: &App, template: &str, theme: Theme) -> String {
 
 /// What the page shows first. Waits briefly for the first read, so a fresh
 /// server rarely renders the loading screen.
-async fn initial_state(app: &App) -> InitialState {
+async fn initial_state(app: &Arc<App>) -> InitialState {
     let mut library = app.library.subscribe();
     let state =
         match tokio::time::timeout(FIRST_LOAD_WAIT, library.wait_for(|state| !matches!(state, LibraryState::Loading)))
@@ -514,6 +520,13 @@ async fn initial_state(app: &App) -> InitialState {
             Ok(Ok(state)) => state.clone(),
             _ => LibraryState::Loading,
         };
+    let state = match state {
+        LibraryState::Failed(_) => match reload(Arc::clone(app), Keep::Nothing).await {
+            Ok(library) => LibraryState::Ready(library),
+            Err(failure) => LibraryState::Failed(failure.message),
+        },
+        state => state,
+    };
     match state {
         LibraryState::Loading => InitialState::default(),
         LibraryState::Ready(library) => {
@@ -523,8 +536,9 @@ async fn initial_state(app: &App) -> InitialState {
     }
 }
 
-/// The library once the first read has finished, or the error it ended with.
-async fn ready_library(app: &App) -> Result<Arc<Library>, HttpError> {
+/// The library once the first read has finished. After a failed read, the
+/// database is read again.
+async fn ready_library(app: &Arc<App>) -> Result<Arc<Library>, HttpError> {
     let mut library = app.library.subscribe();
     let state = library
         .wait_for(|state| !matches!(state, LibraryState::Loading))
@@ -533,20 +547,29 @@ async fn ready_library(app: &App) -> Result<Arc<Library>, HttpError> {
         .map_err(|_| HttpError::new(StatusCode::INTERNAL_SERVER_ERROR, "the library is unavailable"))?;
     match state {
         LibraryState::Ready(library) => Ok(library),
-        LibraryState::Failed(error) => Err(HttpError::new(StatusCode::INTERNAL_SERVER_ERROR, error)),
+        LibraryState::Failed(_) => reload(Arc::clone(app), Keep::Nothing).await,
         LibraryState::Loading => unreachable!("waited for the first read"),
     }
 }
 
-async fn view(app: &App, url: &Url) -> Result<tracker_app::api::ViewResponse, HttpError> {
+async fn view(app: &Arc<App>, url: &Url) -> Result<tracker_app::api::ViewResponse, HttpError> {
     let query = ViewQuery::parse(url).map_err(|message| HttpError::new(StatusCode::BAD_REQUEST, message))?;
     let library = ready_library(app).await?;
     Ok(library.view(&query, &|ids| app.artwork.known(ids)))
 }
 
+/// What a failed read leaves in place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Keep {
+    /// The library pages already have (`POST /api/reload`).
+    Library,
+    /// Nothing: the failure is recorded, and the next request reads again.
+    Nothing,
+}
+
 /// Reads the database into the next library version, in a task of its own
 /// so a client hanging up cannot leave it half done.
-async fn reload(app: Arc<App>) -> Result<Arc<Library>, HttpError> {
+async fn reload(app: Arc<App>, keep: Keep) -> Result<Arc<Library>, HttpError> {
     let task = tokio::spawn(async move {
         let _writer = app.library_writer.lock().await;
         let db = Arc::clone(&app.db);
@@ -565,7 +588,10 @@ async fn reload(app: Arc<App>) -> Result<Arc<Library>, HttpError> {
                 Ok(library)
             }
             Err(failure) => {
-                app.library.send_replace(LibraryState::Failed(failure.message.clone()));
+                let has_library = matches!(*app.library.borrow(), LibraryState::Ready(_));
+                if !(keep == Keep::Library && has_library) {
+                    app.library.send_replace(LibraryState::Failed(failure.message.clone()));
+                }
                 Err(failure)
             }
         }
@@ -618,7 +644,7 @@ async fn sync(app: &Arc<App>) -> Result<SyncStats, HttpError> {
                     if result.is_ok() {
                         // Pages refetch after a sync; have the new plays ready.
                         // A failed read shows on the pages instead.
-                        let _ = reload(Arc::clone(&app)).await;
+                        let _ = reload(Arc::clone(&app), Keep::Nothing).await;
                     }
                     // A finished run does not stick: the next request syncs again.
                     *app.syncing.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;

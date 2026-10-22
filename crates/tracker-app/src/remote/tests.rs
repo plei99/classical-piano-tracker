@@ -90,7 +90,7 @@ fn a_server_rendered_page_starts_with_its_first_window() {
     let mut loading = WebModel::from_initial(Services::ALL, InitialState::default());
     assert!(loading.loading_tracks);
     let request = fetch(loading.init());
-    assert_eq!((request.kind, request.around), (ViewKind::Refresh, None), "the first read needs no reload");
+    assert_eq!((request.kind, request.around), (ViewKind::Reload, None), "a failure shows the error screen");
     deliver(&mut loading, request, 1, &ids(5));
     assert!(!loading.loading_tracks);
     assert_eq!(loading.selected_track_id(), 1);
@@ -178,30 +178,26 @@ fn moving_within_loaded_rows_never_fetches() {
 }
 
 #[test]
-fn jumps_to_rows_not_loaded_wait_for_them() {
+fn jumps_to_rows_not_loaded_select_a_placeholder_until_they_arrive() {
     let mut model = web_model(1000);
     let request = fetch(key(&mut model, "G"));
     assert_eq!((request.offset, request.limit), (900, CHUNK));
-    assert_eq!(model.selected_index, 0, "the selection stays until the row arrives");
-    assert_eq!(model.pending_index, Some(999));
+    assert_eq!(model.selected_index, 999, "the selection moves at once");
+    assert!(model.selected_track().is_none(), "onto a row still on its way");
+    assert!(key(&mut model, "e").is_none() && !model.editing_rating, "nothing to rate yet");
     assert!(key(&mut model, "G").is_none(), "already on its way");
     assert!(deliver(&mut model, request, 1, &ids(1000)).is_none());
     assert_eq!((model.selected_index, model.selected_track_id()), (999, 1000));
     assert!(key(&mut model, "g").is_none(), "row 0 is still loaded");
     assert_eq!(model.selected_index, 0);
 
-    // A jump whose rows arrive after the editor opened is dropped...
+    // Moving on before the rows arrive keeps the new selection.
     let mut model = web_model(1000);
     let request = fetch(key(&mut model, "end"));
-    let mut editing = model.clone();
-    key(&mut editing, "e");
-    deliver(&mut editing, request.clone(), 1, &ids(1000));
-    assert_eq!((editing.selected_index, editing.editing_rating), (0, true));
-    // ...and so is one overtaken by another move.
-    key(&mut model, "j");
-    assert_eq!(model.pending_index, None);
+    key(&mut model, "k");
+    assert_eq!(model.selected_index, 998);
     deliver(&mut model, request, 1, &ids(1000));
-    assert_eq!(model.selected_index, 1);
+    assert_eq!((model.selected_index, model.selected_track_id()), (998, 999));
 }
 
 #[test]
@@ -264,25 +260,46 @@ fn a_selection_that_moved_meanwhile_is_kept_or_fetched_again() {
 }
 
 #[test]
-fn a_saved_rating_shows_at_once_and_the_list_is_fetched_again_without_a_gap() {
+fn a_saved_rating_shows_at_once_and_the_rows_stay() {
     let mut model = web_model(1000);
     key(&mut model, "j");
     key(&mut model, "e");
     key(&mut model, "4");
     let Some(Cmd::SaveRating(params)) = key(&mut model, "enter") else { panic!("saves") };
     let rating = Rating { track_id: params.track_id, stars: 4, opinion: String::new(), updated_at: 5 };
-    let request = fetch(model.update(Msg::RatingSaved { track_id: params.track_id, result: Ok(rating.clone()) }));
-    assert_eq!(model.selected_rating(), Some(&rating), "the server's answer, before the refetch");
+    let cmd = model.update(Msg::RatingSaved { track_id: params.track_id, result: Ok(rating.clone()) });
+    assert!(cmd.is_none(), "no refetch: the order did not change");
+    assert_eq!(model.selected_rating(), Some(&rating), "the server's answer");
     assert_eq!(model.status_message, "Saved 4/5 rating for track 2");
+
+    // The next window comes from the newer library: the list is fetched
+    // again around the selection, without a gap.
+    let more = fetch(model.update(Msg::Viewport { first: 85, last: 100 }));
+    let newer = window(2, &ids(1000), more.offset, more.limit, None);
+    let request = fetch(model.update(Msg::ViewLoaded { request: more, result: Ok(newer) }));
     assert_eq!((request.kind, request.around), (ViewKind::Refresh, Some(2)));
     assert!(model.list.row(0).is_some(), "the rows stay while the list is fetched again");
-
     let mut response = window(2, &ids(1000), 0, CHUNK, Some(2));
     response.rows[1].rating = Some(rating.clone());
     model.update(Msg::ViewLoaded { request, result: Ok(response) });
     assert_eq!((model.selected_track_id(), model.list.version()), (2, 2));
     assert_eq!(model.selected_rating(), Some(&rating));
     assert_eq!(model.status_message, "Saved 4/5 rating for track 2", "a refetch does not clear the status");
+}
+
+#[test]
+fn a_saved_rating_sorted_unrated_first_fetches_the_list_again() {
+    let mut model = web_model(10);
+    let request = fetch(key(&mut model, "o"));
+    deliver(&mut model, request, 1, &ids(10));
+    let request = fetch(key(&mut model, "o"));
+    deliver(&mut model, request, 1, &ids(10));
+    let request = fetch(key(&mut model, "o"));
+    assert_eq!(request.sort, SortMode::UnratedFirst);
+    deliver(&mut model, request, 1, &ids(10));
+    let rating = Rating { track_id: 1, stars: 5, opinion: String::new(), updated_at: 5 };
+    let request = fetch(model.update(Msg::RatingSaved { track_id: 1, result: Ok(rating) }));
+    assert_eq!((request.kind, request.sort, request.around), (ViewKind::Refresh, SortMode::UnratedFirst, Some(1)));
 }
 
 #[test]
@@ -317,8 +334,19 @@ fn reloads_reread_and_failures_are_reported() {
     assert_eq!(model.list.len(), 10);
     assert_eq!((model.status_message.as_str(), model.status_is_error), ("server stopped", true));
 
-    // After a sync the server has already re-read the database.
+    // After a sync the server has already re-read the database, and a
+    // failed fetch keeps the rows on screen.
     model.syncing = true;
     let request = fetch(model.update(Msg::SyncFinished(Ok(tracker_core::SyncStats::default()))));
     assert_eq!(request.kind, ViewKind::Refresh);
+    model.update(Msg::ViewLoaded { request, result: Err(anyhow!("server stopped")) });
+    assert_eq!((model.loading_tracks, model.err.as_deref(), model.list.len()), (false, None, 10));
+    assert_eq!((model.status_message.as_str(), model.status_is_error), ("server stopped", true));
+}
+
+#[test]
+fn no_windows_are_fetched_while_a_new_list_is_on_its_way() {
+    let mut model = web_model(1000);
+    let _sort = fetch(key(&mut model, "o"));
+    assert!(model.update(Msg::Viewport { first: 85, last: 100 }).is_none());
 }

@@ -48,16 +48,21 @@ impl RowData {
     }
 }
 
-/// The rows near the viewport and their positions in the filtered list.
+/// The rows near the viewport, plus the selected row wherever it is, and
+/// their positions in the filtered list.
 #[derive(Debug, Clone, PartialEq)]
 struct Shown {
+    /// The viewport's rows, `first..last`.
     first: usize,
+    last: usize,
     rows: Vec<RowData>,
+    /// Each row's position, in the same order as `rows`.
+    indexes: Vec<usize>,
 }
 
 impl Shown {
     fn index_of(&self, id: i64) -> Option<usize> {
-        self.rows.iter().position(|row| row.id == id).map(|offset| self.first + offset)
+        self.rows.iter().position(|row| row.id == id).map(|offset| self.indexes[offset])
     }
 }
 
@@ -90,10 +95,9 @@ pub fn TrackList(model: RwSignal<WebModel>, send: Callback<Msg>, search_ref: Nod
     });
 
     // Keep the selection in view, the way the terminal's window follows it.
+    // Rows arriving do not count: they must not pull a scrolled list back.
     let selection = Memo::new(move |_| {
-        model.with(|m| {
-            (m.selected_index, m.shown_sort_mode(), m.shown_query().to_string(), m.list.len(), m.selected_track_id())
-        })
+        model.with(|m| (m.selected_index, m.shown_sort_mode(), m.shown_query().to_string(), m.list.len()))
     });
     Effect::new(move |_| {
         let selected_index = selection.with(|selection| selection.0);
@@ -118,9 +122,18 @@ pub fn TrackList(model: RwSignal<WebModel>, send: Callback<Msg>, search_ref: Nod
     let shown = Memo::new(move |_| {
         let (scroll_top, height) = (scroll_top.get(), height.get());
         model.with(|m| {
-            let (first, last) = window_range(m.list.len(), scroll_top, height);
-            let rows = (first..last)
-                .map(|index| match m.list.row(index) {
+            let len = m.list.len();
+            let (first, last) = window_range(len, scroll_top, height);
+            let mut indexes: Vec<usize> = (first..last).collect();
+            // The selection is always in the DOM: after a jump it shows (and
+            // is the listbox's active descendant) before the scroll event
+            // moves the window, and it stays when the list scrolls away.
+            if m.selected_index < len && !(first..last).contains(&m.selected_index) {
+                indexes.push(m.selected_index);
+            }
+            let rows = indexes
+                .iter()
+                .map(|&index| match m.list.row(index) {
                     Some(row) => RowData {
                         id: row.track.id,
                         spotify_id: row.track.spotify_id.clone(),
@@ -131,12 +144,12 @@ pub fn TrackList(model: RwSignal<WebModel>, send: Callback<Msg>, search_ref: Nod
                     None => RowData::placeholder(index),
                 })
                 .collect();
-            Shown { first, rows }
+            Shown { first, last, rows, indexes }
         })
     });
     Effect::new(move |_| shown.with(|shown| store.request(shown.rows.iter().map(|row| row.spotify_id.as_str()))));
     // Keep the rows around the viewport loaded.
-    let range = Memo::new(move |_| shown.with(|shown| (shown.first, shown.first + shown.rows.len())));
+    let range = Memo::new(move |_| shown.with(|shown| (shown.first, shown.last)));
     Effect::new(move |_| {
         let (first, last) = range.get();
         send.run(Msg::Viewport { first, last });

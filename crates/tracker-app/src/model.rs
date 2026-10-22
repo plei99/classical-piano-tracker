@@ -230,9 +230,9 @@ pub struct BrowserModel<L> {
     /// (once any fetch in flight has arrived).
     pub list: L,
     pub sort_mode: SortMode,
+    /// The selected row. In the web UI it may not be loaded yet (after a
+    /// jump); it is drawn as a placeholder until its window arrives.
     pub selected_index: usize,
-    /// A row the selection moves to once it has been fetched.
-    pub pending_index: Option<usize>,
     pub editing_rating: bool,
     /// Moves focus from the stars field to the opinion, where digits are
     /// ordinary text instead of star ratings.
@@ -260,7 +260,6 @@ impl<L: Default> Default for BrowserModel<L> {
             list: L::default(),
             sort_mode: SortMode::default(),
             selected_index: 0,
-            pending_index: None,
             editing_rating: false,
             editing_opinion: false,
             draft_stars: 0,
@@ -298,9 +297,11 @@ impl WebModel {
 }
 
 impl<L: TrackList> BrowserModel<L> {
-    /// The command to run at startup: an asynchronous library read.
+    /// The command to run at startup: an asynchronous library read. A page
+    /// that has to fetch its first list asks the server to re-read the
+    /// database, so a failure shows the error screen with Retry.
     pub fn init(&mut self) -> Option<Cmd> {
-        Some(self.load(false))
+        Some(self.load(true))
     }
 
     fn load(&mut self, reread: bool) -> Cmd {
@@ -439,24 +440,16 @@ impl<L: TrackList> BrowserModel<L> {
             ViewOutcome::Replaced(index) => {
                 self.loading_tracks = false;
                 self.err = None;
-                self.pending_index = None;
                 self.select_after_refresh(index);
                 None
             }
             ViewOutcome::Retarget | ViewOutcome::Outdated => self.refresh_track_list(selected_track_id),
-            ViewOutcome::Merged => {
-                let index = self.pending_index?;
-                if self.syncing || self.saving_rating || self.editing_rating {
-                    self.pending_index = None;
-                    return None;
-                }
-                // Still not loaded: another window is on its way.
-                self.list.row(index)?;
-                self.move_selection_to(index)
-            }
+            ViewOutcome::Merged => None,
             ViewOutcome::Failed(err) => {
-                if self.loading_tracks || request.kind == ViewKind::Reload {
-                    self.loading_tracks = false;
+                self.loading_tracks = false;
+                // Only a re-read (`r`, Retry, the first load) replaces the
+                // list with the error screen; otherwise the rows stay.
+                if request.kind == ViewKind::Reload {
                     self.err = Some(format!("{err:#}"));
                 } else {
                     self.set_status(format!("{err:#}"), true);
@@ -681,17 +674,12 @@ impl<L: TrackList> BrowserModel<L> {
             return None;
         }
         let index = index.min(self.list.len() - 1);
-        if self.list.row(index).is_none() {
-            // Not fetched yet: move once it arrives.
-            self.pending_index = Some(index);
-            return self.list.fetch(index);
-        }
-        self.pending_index = None;
         if index != self.selected_index {
             self.selected_index = index;
             self.clear_status();
         }
-        None
+        // A row not fetched yet shows as a placeholder until it arrives.
+        self.list.fetch(index)
     }
 
     /// Opens the rating editor on the stars field, prefilled from the saved
@@ -726,7 +714,6 @@ impl<L: TrackList> BrowserModel<L> {
     /// selection on `selected_track_id` when it is still visible. A fetched
     /// list does this when the answer arrives.
     pub fn refresh_track_list(&mut self, selected_track_id: i64) -> Option<Cmd> {
-        self.pending_index = None;
         match self.list.refresh(self.sort_mode, &self.search_query, selected_track_id) {
             Refresh::Done(index) => {
                 self.select_after_refresh(index);

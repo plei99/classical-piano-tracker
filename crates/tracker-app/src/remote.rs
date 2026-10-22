@@ -253,15 +253,16 @@ impl TrackList for RemoteTracks {
         self.new_list(if reread { ViewKind::Reload } else { ViewKind::Refresh }, sort, query, selected)
     }
 
-    fn rating_saved(&mut self, track_id: i64, rating: Rating, _sort: SortMode) -> bool {
+    fn rating_saved(&mut self, track_id: i64, rating: Rating, sort: SortMode) -> bool {
         if let Some(&index) = self.by_id.get(&track_id)
             && let Some(entry) = self.rows[index].as_deref_mut()
         {
             entry.rating = Some(rating);
         }
-        // The server's library moved to a new version (and, sorted unrated
-        // first, a new order); fetch the list again so later windows match.
-        true
+        // Sorted unrated first, the track moves: fetch the list again. In any
+        // other order the rows stay; the server's library is a version ahead,
+        // so the next window fetched refetches the list around the selection.
+        sort == SortMode::UnratedFirst
     }
 
     fn applied(&self) -> Option<(SortMode, &str)> {
@@ -328,6 +329,10 @@ impl TrackList for RemoteTracks {
     }
 
     fn viewport(&mut self, first: usize, last: usize) -> Option<Cmd> {
+        if self.awaited.is_some() {
+            // A new list is on its way; windows of this one would be wasted.
+            return None;
+        }
         let len = self.rows.len();
         let last = last.min(len);
         let first = first.min(last);

@@ -8,7 +8,9 @@
 //! Every request that changes state must carry the per-launch token from the
 //! page's `<meta name="tracker-token">` in the [`TOKEN_HEADER`] header; other
 //! sites can neither read the token nor send that header without a CORS
-//! preflight, which the server never approves.
+//! preflight, which the server never approves. Requests a browser marks as
+//! coming from another site (`Sec-Fetch-Site`) are refused, except links to
+//! the page, so other sites cannot time the API's answers either.
 //!
 //! The presence stream is a GET, because `EventSource` cannot send headers,
 //! so it takes the token as a query parameter instead. A wrong or missing

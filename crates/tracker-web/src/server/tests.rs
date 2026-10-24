@@ -325,6 +325,34 @@ async fn accepts_localhost_and_rejects_any_other_host() {
 }
 
 #[tokio::test]
+async fn refuses_other_sites_requests_but_lets_them_link_to_the_page() {
+    let h = harness().await;
+    h.first_read().await;
+    let token = h.server.token.clone();
+    let artwork = format!("{ARTWORK_PATH}?ids=sp-1");
+    // Localhost on another port is the same site, and no more trusted.
+    for site in ["cross-site", "same-site"] {
+        for (path, mode) in [(VIEW, "no-cors"), (&artwork, "cors"), (VIEW, "navigate"), ("/", "no-cors")] {
+            let reply = h.call("GET", path, &[("Sec-Fetch-Site", site), ("Sec-Fetch-Mode", mode)], "").await;
+            assert_eq!(reply.status, 403, "{site} {mode} {path}");
+        }
+        let view = h.call("GET", VIEW, &[("Sec-Fetch-Site", site)], "").await;
+        assert_eq!(view.json(), json!({ "error": "cross-site request" }));
+        let sync = h.call("POST", SYNC_PATH, &[(TOKEN_HEADER, &token), ("Sec-Fetch-Site", site)], "").await;
+        assert_eq!(sync.status, 403, "{site}");
+        let link = h.call("GET", "/", &[("Sec-Fetch-Site", site), ("Sec-Fetch-Mode", "navigate")], "").await;
+        assert_eq!(link.status, 200, "{site}");
+    }
+    assert!(h.artwork_calls.lock().unwrap().is_empty());
+    assert_eq!(h.sync_calls.load(Ordering::SeqCst), 0);
+    // The page's own requests, a typed URL, and clients without fetch metadata.
+    for site in ["same-origin", "none"] {
+        assert_eq!(h.call("GET", VIEW, &[("Sec-Fetch-Site", site)], "").await.status, 200, "{site}");
+    }
+    assert_eq!(h.get(&artwork).await.status, 200);
+}
+
+#[tokio::test]
 async fn requires_the_token_on_post() {
     let h = harness().await;
     let wrong = "f".repeat(32);

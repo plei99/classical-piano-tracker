@@ -453,9 +453,12 @@ over 1 KiB are compressed per response. The presence stream never is.
 
 The server listens on 127.0.0.1 only and rejects other Host headers. Every
 write, and the presence stream, needs a per-launch token embedded in the
-page, so another site cannot keep the server running. Spotify's player
-requires `'unsafe-eval'` in the page's script policy; only this app's
-script and Spotify's can run, and the page has no inline scripts.
+page, so another site cannot keep the server running. Requests the browser
+marks as coming from another site (`Sec-Fetch-Site`) are refused, except a
+link to the page, so other sites cannot probe the library by timing the
+API's answers. Spotify's player requires `'unsafe-eval'` in the page's
+script policy; only this app's script and Spotify's can run, and the page
+has no inline scripts.
 
 ## Recommendations
 

@@ -435,6 +435,15 @@ async fn route(
     if !app.hosts.contains(&host) {
         return Err(HttpError::new(StatusCode::FORBIDDEN, "forbidden host"));
     }
+    // Browsers mark every request with the site it comes from. Another
+    // site's page (localhost on another port is the same site) may link to
+    // the page and nothing more, so it can neither time the API's answers
+    // (does a search match, is a cover cached) nor set off artwork lookups.
+    let site = header_text(request.headers(), "sec-fetch-site");
+    let navigation = !is_api && header_text(request.headers(), "sec-fetch-mode") == "navigate";
+    if (site == "cross-site" || site == "same-site") && !navigation {
+        return Err(HttpError::new(StatusCode::FORBIDDEN, "cross-site request"));
+    }
     let method = request.method().clone();
     if method != Method::GET && method != Method::POST {
         return Err(HttpError::method_not_allowed("GET, POST"));
